@@ -1,0 +1,57 @@
+name: Build release archives
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read versions
+        id: versions
+        run: |
+          INTEGRATION_VERSION="$(python3 -c "import json;print(json.load(open('custom_components/imou_life/manifest.json'))['version'])")"
+          ADDON_VERSION="$(python3 -c "import re;print(re.search(r'^version: \"([^\"]+)\"', open('addons/imou_life_bridge/config.yaml').read(), re.M).group(1))")"
+          echo "integration=$INTEGRATION_VERSION" >> "$GITHUB_OUTPUT"
+          echo "addon=$ADDON_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build integration archive
+        run: |
+          mkdir -p dist
+          zip -r "dist/imou_life-custom-component-${{ steps.versions.outputs.integration }}.zip" \
+            custom_components/imou_life -x '*/__pycache__/*' '*.pyc'
+
+      - name: Build add-on archive
+        run: |
+          zip -r "dist/imou_life-bridge-addon-${{ steps.versions.outputs.addon }}.zip" \
+            addons/imou_life_bridge -x '*/__pycache__/*' '*.pyc'
+
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum ./*.zip > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: imou-life-archives
+          path: dist/*
+
+      - name: Publish release assets
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "${{ github.ref_name }}" >/dev/null 2>&1 || \
+            gh release create "${{ github.ref_name }}" --title "${{ github.ref_name }}" --generate-notes
+          gh release upload "${{ github.ref_name }}" dist/* --clobber
