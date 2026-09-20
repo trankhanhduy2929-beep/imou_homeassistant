@@ -97,7 +97,7 @@ class ImouLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @callback
     def async_get_options_flow(
         config_entry: config_entries.ConfigEntry,
-    ) -> ImouLifeOptionsFlow:
+    ) -> "ImouLifeOptionsFlow":
         return ImouLifeOptionsFlow(config_entry)
 
     def __init__(self) -> None:
@@ -666,22 +666,33 @@ class ImouLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 class ImouLifeOptionsFlow(config_entries.OptionsFlow):
     """Allow setting a local LAN host per Imou device for direct RTSP."""
 
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        self.config_entry = config_entry
-        self._local_host = dict(config_entry.options.get(CONF_LOCAL_HOST) or {})
-
     async def async_step_init(self, user_input=None):
+        config_entry = self.config_entry
+        options = dict(config_entry.options or {})
+        local = options.get(CONF_LOCAL_HOST)
+        local_host = ""
+        if isinstance(local, dict):
+            local_host = str(local.get("default", "")).strip()
+        elif isinstance(local, str):
+            local_host = local.strip()
         if user_input is not None:
             host = str(user_input.get(CONF_LOCAL_HOST, "")).strip()
-            self._local_host = {"default": host} if host else {}
-            return self.async_create_entry(data={CONF_LOCAL_HOST: self._local_host})
-        devices = getattr(
-            self.config_entry.runtime_data.coordinator, "data", None
-        ) or {}
+            new_options = dict(options)
+            if host:
+                new_options[CONF_LOCAL_HOST] = {"default": host}
+            else:
+                new_options.pop(CONF_LOCAL_HOST, None)
+            return self.async_create_entry(data=new_options)
+        devices = {}
+        runtime = getattr(config_entry, "runtime_data", None)
+        coordinator = getattr(runtime, "coordinator", None)
+        data = getattr(coordinator, "data", None)
+        if isinstance(data, dict):
+            devices = data
         fields = {
             vol.Optional(
                 CONF_LOCAL_HOST,
-                default=next(iter(self._local_host.values()), ""),
+                default=local_host,
             ): selector.TextSelector(
                 selector.TextSelectorConfig(
                     type=selector.TextSelectorType.TEXT,
@@ -689,12 +700,12 @@ class ImouLifeOptionsFlow(config_entries.OptionsFlow):
                 )
             ),
         }
-        if devices:
-            hints = "Thiết bị: " + ", ".join(
-                f"{d.name} ({d.device_id})" for d in list(devices.values())[:8]
-            )
-        else:
-            hints = "Nhập IP camera trong cùng LAN để Hass dùng RTSP trực tiếp."
+        hints = (
+            "Thiết bị: "
+            + ", ".join(f"{d.name} ({d.device_id})" for d in list(devices.values())[:8])
+            if devices
+            else "Nhập IP camera trong cùng LAN để Hass dùng RTSP trực tiếp."
+        )
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(fields),

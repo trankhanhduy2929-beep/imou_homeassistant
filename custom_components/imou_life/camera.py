@@ -32,9 +32,17 @@ async def async_setup_entry(
     entry: ImouConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up one camera entity per discovered channel."""
+    """Set up camera entities only when a local host is configured."""
     coordinator = entry.runtime_data.coordinator
     p2p = entry.runtime_data.p2p
+    entry_options = entry.options.get("local_host") or {}
+    local_host = (
+        str(entry_options.get("default", "")).strip()
+        if isinstance(entry_options, dict)
+        else str(entry_options).strip()
+    )
+    if not local_host:
+        return
 
     def build(device: ImouDevice) -> Iterable[Entity]:
         return (
@@ -133,7 +141,12 @@ class ImouLifeCamera(ImouChannelEntity, Camera):
             return None
         entry = getattr(self.coordinator, "config_entry", None)
         options = getattr(entry, "options", {}) or {}
-        local_host = str((options.get("local_host") or {}).get("default", "")).strip()
+        local_options = options.get("local_host") or {}
+        local_host = (
+            str(local_options.get("default", "")).strip()
+            if isinstance(local_options, dict)
+            else str(local_options).strip()
+        )
         if local_host:
             config = p2p_config_from_device(device)
             if config.rtsp_username and config.rtsp_password:

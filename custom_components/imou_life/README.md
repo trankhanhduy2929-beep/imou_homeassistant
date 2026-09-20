@@ -10,6 +10,18 @@ Custom integration này đăng nhập trực tiếp Imou Life bằng account/pas
 4. Nhập tài khoản và mật khẩu Imou Life.
 5. Nếu Imou yêu cầu CAPTCHA, mở liên kết xác minh do config flow hiển thị. Với mã `12112`, nhập mã SMS/email sáu số ở bước tiếp theo.
 
+**Nâng cấp lên `0.1.16`:** giải nén `imou_life-custom-component-0.1.16.zip`, chép đè mã trong `/config/custom_components/imou_life`, rồi restart Home Assistant; giữ nguyên config entry và cấu hình hiện có.
+
+Bản `0.1.16`:
+
+- **Tách camera khỏi setup mặc định:** login chỉ tạo sensors/settings/entities, không probe P2P nên không treo khi thêm integration.
+- **RTSP local tuỳ chọn:** vào **Settings → Imou Life → Configure** nhập IP camera trong cùng LAN để dùng RTSP trực tiếp; camera entity chỉ được tạo khi có IP.
+- **Discovery lấy `familyId` thật** qua `family.manager.UserFamilyGet` trước `DeviceBasicInfoQueryV2`, sửa lỗi account có family riêng không thấy thiết bị.
+- **P2P credential parsing sửa**: đọc đúng `p2pConfig.accountNew`/`p2pToken`/`ak`.
+- **P2P handshake theo tham chiếu**: agent sign → device auth, đúng PTCP counter và cleanup.
+- **MQTT alarm push**: đăng ký `SetClientPushConfig` nhận sự kiện gần như tức thời.
+- **HTTP body fix**: đọc đến EOF, không cắt JSON.
+
 **Nâng cấp lên `0.1.15`:** giải nén `imou_life-custom-component-0.1.15.zip`, chép đè mã trong `/config/custom_components/imou_life`, rồi restart Home Assistant; giữ nguyên config entry và cấu hình hiện có.
 
 Bản `0.1.15` có:

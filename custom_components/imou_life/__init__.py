@@ -38,13 +38,13 @@ if TYPE_CHECKING:
 PLATFORMS = (
     Platform.BINARY_SENSOR,
     Platform.BUTTON,
-    Platform.CAMERA,
     Platform.NUMBER,
     Platform.SELECT,
     Platform.SENSOR,
     Platform.SWITCH,
     Platform.TEXT,
 )
+CAMERA_PLATFORMS = (Platform.CAMERA,)
 
 
 @dataclass(slots=True)
@@ -121,7 +121,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ImouConfigEntry) -> bool
 
 async def async_unload_entry(hass: HomeAssistant, entry: ImouConfigEntry) -> bool:
     """Unload an Imou Life config entry."""
-    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    unloaded = await hass.config_entries.async_unload_platforms(
+        entry, PLATFORMS + CAMERA_PLATFORMS
+    )
     if not unloaded:
         return False
     runtime = entry.runtime_data

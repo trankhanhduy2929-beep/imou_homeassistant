@@ -60,11 +60,10 @@ Sau khi kết nối MQTT, integration đăng ký nhận sự kiện trực tiế
 Motion/person được đẩy tới gần như ngay thay vì chờ chu kỳ poll 30 giây; polling vẫn giữ
 làm dự phòng khi MQTT tạm mất.
 
-## RTSP trên LAN
+## RTSP trên LAN (tuỳ chọn)
 
-Vào **Settings → Devices & services → Imou Life → Configure**, nhập IP camera trong cùng
-LAN để dùng RTSP trực tiếp (không cần P2P). Khi thiết bị không ở cùng LAN hoặc không nhập IP,
-integration fallback sang P2P/cloud như trước.
+Camera entity chỉ được tạo khi anh vào **Settings → Imou Life → Configure** và nhập IP camera
+trong cùng LAN — login mặc định chỉ tạo sensors/settings/entities, không probe P2P.
 
 ## Tính năng theo thiết bị
 
