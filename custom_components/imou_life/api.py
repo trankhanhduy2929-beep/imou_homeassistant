@@ -2128,28 +2128,51 @@ class ImouApiClient:
 
     async def _list_device_basic_info(self) -> list[Mapping[str, Any]]:
         devices: list[Mapping[str, Any]] = []
-        offset = 0
-        transfer = ""
-        for _ in range(20):
-            data = await self.async_request(
-                "device.list.DeviceBasicInfoQueryV2",
-                "",
-                {
-                    "familyId": "",
-                    "groupId": "-1",
-                    "limit": 64,
-                    "needNewSecret": True,
-                    "offset": offset,
-                    "transferStr": transfer,
-                },
+        seen: set[str] = set()
+        family_ids = [""]
+        try:
+            family_data = await self.async_request(
+                "family.manager.UserFamilyGet",
+                "201076",
+                {"_nouse": 0},
             )
-            items = data.get("deviceList") or []
-            if isinstance(items, list):
-                devices.extend(item for item in items if isinstance(item, Mapping))
-            if not data.get("hasNextPage"):
-                break
-            offset += len(items)
-            transfer = str(data.get("transferStr") or "")
+            families = family_data.get("families") or []
+            if isinstance(families, list):
+                for family in families[:8]:
+                    if isinstance(family, Mapping):
+                        family_id = str(family.get("familyId") or "").strip()
+                        if family_id:
+                            family_ids.append(family_id)
+        except ImouApiError:
+            pass
+        for family_id in family_ids:
+            offset = 0
+            transfer = ""
+            for _ in range(20):
+                data = await self.async_request(
+                    "device.list.DeviceBasicInfoQueryV2",
+                    "",
+                    {
+                        "familyId": family_id,
+                        "groupId": "-1",
+                        "limit": 64,
+                        "needNewSecret": True,
+                        "offset": offset,
+                        "transferStr": transfer,
+                    },
+                )
+                items = data.get("deviceList") or []
+                if isinstance(items, list):
+                    for item in items:
+                        if isinstance(item, Mapping):
+                            key = str(item.get("deviceId") or "")
+                            if key and key not in seen:
+                                seen.add(key)
+                                devices.append(item)
+                if not data.get("hasNextPage"):
+                    break
+                offset += len(items)
+                transfer = str(data.get("transferStr") or "")
         return devices
 
     async def _list_basic_devices(self) -> list[Mapping[str, Any]]:

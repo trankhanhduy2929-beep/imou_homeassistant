@@ -47,6 +47,7 @@ from .const import (
     CONF_REQUEST_TIMEOUT,
     CONF_RESEND_CODE,
     CONF_TERMINAL_ID,
+    CONF_LOCAL_HOST,
     CONF_VALID_CODE,
     DEFAULT_MAX_CONCURRENT_REQUESTS,
     DEFAULT_MAX_PROPERTIES,
@@ -91,6 +92,13 @@ class ImouLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
     MINOR_VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> ImouLifeOptionsFlow:
+        return ImouLifeOptionsFlow(config_entry)
 
     def __init__(self) -> None:
         """Initialize transient authentication state."""
@@ -653,6 +661,45 @@ class ImouLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 title=title,
             )
         return self.async_create_entry(title=title, data=self._data)
+
+
+class ImouLifeOptionsFlow(config_entries.OptionsFlow):
+    """Allow setting a local LAN host per Imou device for direct RTSP."""
+
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        self.config_entry = config_entry
+        self._local_host = dict(config_entry.options.get(CONF_LOCAL_HOST) or {})
+
+    async def async_step_init(self, user_input=None):
+        if user_input is not None:
+            host = str(user_input.get(CONF_LOCAL_HOST, "")).strip()
+            self._local_host = {"default": host} if host else {}
+            return self.async_create_entry(data={CONF_LOCAL_HOST: self._local_host})
+        devices = getattr(
+            self.config_entry.runtime_data.coordinator, "data", None
+        ) or {}
+        fields = {
+            vol.Optional(
+                CONF_LOCAL_HOST,
+                default=next(iter(self._local_host.values()), ""),
+            ): selector.TextSelector(
+                selector.TextSelectorConfig(
+                    type=selector.TextSelectorType.TEXT,
+                    autocomplete="ip",
+                )
+            ),
+        }
+        if devices:
+            hints = "Thiết bị: " + ", ".join(
+                f"{d.name} ({d.device_id})" for d in list(devices.values())[:8]
+            )
+        else:
+            hints = "Nhập IP camera trong cùng LAN để Hass dùng RTSP trực tiếp."
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(fields),
+            description_placeholders={"devices": hints},
+        )
 
 
 def _password_selector() -> selector.TextSelector:

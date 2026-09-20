@@ -15,6 +15,7 @@ CONF_MAX_CONCURRENT_REQUESTS: Final = "max_concurrent_requests"
 CONF_MAX_PROPERTIES: Final = "max_properties"
 CONF_VALID_CODE: Final = "valid_code"
 CONF_RESEND_CODE: Final = "resend_code"
+CONF_LOCAL_HOST: Final = "local_host"
 
 DEFAULT_POLL_INTERVAL: Final = 30
 DEFAULT_REQUEST_TIMEOUT: Final = 15

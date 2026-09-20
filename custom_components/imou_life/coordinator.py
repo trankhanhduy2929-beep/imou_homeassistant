@@ -64,6 +64,7 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
             update_interval=timedelta(seconds=poll_interval),
         )
         self.api = api
+        self.config_entry = config_entry
         self.max_properties = max_properties
         self._model_cache: dict[str, ThingModel] = {}
         self.realtime_connected = False

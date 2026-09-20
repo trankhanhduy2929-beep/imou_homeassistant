@@ -59,6 +59,7 @@ class ImouP2PDeviceConfig:
     p2p_username: str = field(default="", repr=False)
     p2p_password: str = field(default="", repr=False)
     p2p_type: int = 0
+    p2p_port: int = _DEFAULT_RTSP_PORT
     rtsp_username: str = field(default="", repr=False)
     rtsp_password: str = field(default="", repr=False)
 
@@ -152,19 +153,35 @@ def p2p_config_from_device(device: ImouDevice) -> ImouP2PDeviceConfig:
         p2p_raw = {}
     device_username = str(raw.get("deviceUsername") or "").strip()
     device_password = str(raw.get("devicePassword") or "").strip()
-    p2p_username = str(p2p_raw.get("account") or device_username).strip()
-    p2p_password = str(p2p_raw.get("password") or device_password).strip()
+    p2p_username = str(
+        p2p_raw.get("account")
+        or p2p_raw.get("accountNew")
+        or p2p_raw.get("username")
+        or p2p_raw.get("user")
+        or device_username
+    ).strip()
+    p2p_password = str(
+        p2p_raw.get("password")
+        or p2p_raw.get("p2pToken")
+        or p2p_raw.get("ak")
+        or p2p_raw.get("accessKey")
+        or p2p_raw.get("secret")
+        or p2p_raw.get("token")
+        or device_password
+    ).strip()
     try:
         p2p_type = int(p2p_raw.get("type") or 0)
     except (TypeError, ValueError):
         p2p_type = 0
+    p2p_port = _safe_port(p2p_raw.get("port"), _DEFAULT_RTSP_PORT)
     return ImouP2PDeviceConfig(
         serial=device.device_id,
         p2p_username=p2p_username,
         p2p_password=p2p_password,
         p2p_type=p2p_type,
-        rtsp_username=device_username or p2p_username,
-        rtsp_password=device_password or p2p_password,
+        p2p_port=p2p_port,
+        rtsp_username=device_username,
+        rtsp_password=device_password,
     )
 
 
@@ -204,6 +221,68 @@ def build_rtsp_url(
     return (
         f"rtsp://{user_info}127.0.0.1:{local_port}"
         f"/cam/realmonitor?channel={max(1, channel_number)}&subtype=0"
+    )
+
+
+def build_local_rtsp_url(
+    config: ImouP2PDeviceConfig,
+    host: str,
+    channel_number: int,
+    subtype: int = 0,
+) -> str:
+    """Build a direct RTSP URL when the device is on the same LAN as HA."""
+    user_info = ""
+    if config.rtsp_username:
+        username = quote(config.rtsp_username, safe="")
+        if config.rtsp_password:
+            password = quote(config.rtsp_password, safe="")
+            user_info = f"{username}:{password}@"
+        else:
+            user_info = f"{username}@"
+    port = config.p2p_port
+    return (
+        f"rtsp://{user_info}{host}:{port}"
+        f"/cam/realmonitor?channel={max(1, channel_number)}&subtype={max(0, subtype)}"
+    )
+
+
+def _device_ip_candidates(device: ImouDevice) -> list[str]:
+    raw = device.raw if isinstance(device.raw, Mapping) else {}
+    candidates: list[str] = []
+    for key in (
+        "ip", "lanIp", "lan_ip", "localIp", "local_ip", "deviceIp",
+        "device_ip", "host", "addr", "address",
+    ):
+        value = raw.get(key)
+        if isinstance(value, str) and value.strip():
+            candidates.append(value.strip())
+    for key in ("ipList", "lanIpList", "localIpList", "deviceIpList"):
+        values = raw.get(key)
+        if isinstance(values, (list, tuple)):
+            for item in values:
+                if isinstance(item, str) and item.strip():
+                    candidates.append(item.strip())
+    return list(dict.fromkeys(candidates))
+
+
+def device_local_rtsp_url(
+    device: ImouDevice,
+    channel: ImouChannel,
+    *,
+    subtype: int = 0,
+) -> str | None:
+    """Build a LAN RTSP URL when device metadata supplies its LAN IP."""
+    config = p2p_config_from_device(device)
+    if not config.rtsp_username or not config.rtsp_password:
+        return None
+    candidates = _device_ip_candidates(device)
+    if not candidates:
+        return None
+    host = candidates[0]
+    if not host:
+        return None
+    return build_local_rtsp_url(
+        config, host, rtsp_channel_number(device, channel), subtype
     )
 
 
@@ -337,6 +416,33 @@ def _encrypt_address(key: bytes, nonce: int, address: str) -> str:
     return base64.b64encode(encrypted).decode()
 
 
+def _safe_port(value: Any, default: int = _DEFAULT_RTSP_PORT) -> int:
+    try:
+        port = int(value or default)
+    except (TypeError, ValueError):
+        return default
+    return port if 1 <= port <= 65535 else default
+
+
+def _decrypt_address(key: bytes, nonce: int, encoded: str) -> str:
+    try:
+        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    except ImportError as err:
+        raise ImouP2PError("crypto_unavailable") from err
+    try:
+        derived_key = hashlib.pbkdf2_hmac(
+            "sha256", key, str(nonce).encode(), 20000, 32
+        )
+        decryptor = Cipher(
+            algorithms.AES(derived_key), modes.OFB(_ADDRESS_IV)
+        ).decryptor()
+        decoded = base64.b64decode(encoded, validate=True)
+        plaintext = decryptor.update(decoded) + decryptor.finalize()
+        return plaintext.decode()
+    except ValueError as err:
+        raise ImouP2PError("device_local_decrypt") from err
+
+
 def _device_auth(
     username: str,
     key: bytes,
@@ -409,9 +515,62 @@ class _PtcSession:
 @dataclass(slots=True)
 class _HandshakeResult:
     endpoint: _UdpEndpoint
-    agent: tuple[str, int]
+    target: tuple[str, int]
     session: _PtcSession
     remote_rtsp_port: int
+
+
+async def _async_receive_from(
+    endpoint: _UdpEndpoint,
+    target: tuple[str, int],
+    timeout: float,
+    stage: str,
+    *,
+    prefix: bytes = b"",
+) -> bytes:
+    deadline = asyncio.get_running_loop().time() + timeout
+    for _ in range(64):
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            break
+        try:
+            payload, source = await endpoint.async_recvfrom(remaining)
+        except ImouP2PError as err:
+            if err.stage == "timeout":
+                raise ImouP2PError(stage) from err
+            raise
+        if source == target and payload.startswith(prefix):
+            return payload
+    raise ImouP2PError(stage)
+
+
+async def _async_expect_ptcp(
+    endpoint: _UdpEndpoint,
+    target: tuple[str, int],
+    session: _PtcSession,
+    expected_type: int | None,
+    stage: str,
+) -> bytes:
+    deadline = asyncio.get_running_loop().time() + _HANDSHAKE_TIMEOUT
+    for _ in range(64):
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            break
+        packet = await _async_receive_from(
+            endpoint, target, remaining, stage, prefix=b"PTCP"
+        )
+        body = session.receive(packet)
+        if not body:
+            if expected_type is None:
+                return body
+            continue
+        if expected_type is not None and body[0] == expected_type:
+            return body
+        if body[0] == 0x13:
+            await endpoint.async_sendto(session.build(b""), target)
+            continue
+        raise ImouP2PError(stage)
+    raise ImouP2PError(stage)
 
 
 async def _async_handshake(
@@ -479,14 +638,10 @@ async def _async_handshake(
             info = {}
 
         random_salt = str(info.get("randsalt") or "")
-        try:
-            remote_rtsp_port = int(info.get("rtspport") or _DEFAULT_RTSP_PORT)
-        except (TypeError, ValueError):
-            remote_rtsp_port = _DEFAULT_RTSP_PORT
-        if not 1 <= remote_rtsp_port <= 65535:
-            remote_rtsp_port = _DEFAULT_RTSP_PORT
+        remote_rtsp_port = _safe_port(info.get("rtspport"))
 
-        identify = " ".join(f"{value:x}" for value in secrets.token_bytes(8))
+        identify_bytes = secrets.token_bytes(8)
+        identify = " ".join(f"{value:x}" for value in identify_bytes)
         local_address = f"127.0.0.1:{device_endpoint.local_port}"
         key = b""
         request_nonce = 0
@@ -557,7 +712,10 @@ async def _async_handshake(
             channel_response = _parse_response(channel_payload)
         channel_response = _require_success(channel_response, "p2p_channel")
 
-        relay_auth = ""
+        device_public = _parse_address(
+            channel_response.values.get("PubAddr", ""), "device_public"
+        )
+        response_nonce = request_nonce
         if authenticated:
             try:
                 response_nonce = int(
@@ -565,6 +723,14 @@ async def _async_handshake(
                 )
             except (TypeError, ValueError):
                 response_nonce = request_nonce
+        device_local_raw = channel_response.values.get("LocalAddr", "")
+        if authenticated and device_local_raw:
+            device_local = _decrypt_address(key, response_nonce, device_local_raw)
+        else:
+            device_local = device_local_raw or local_address
+
+        relay_auth = ""
+        if authenticated:
             relay_auth = _device_auth(
                 config.p2p_username,
                 key,
@@ -582,49 +748,150 @@ async def _async_handshake(
             relay_body,
             read_response=False,
         )
-        relay_notice, _source = await relay_endpoint.async_recvfrom(
-            _HANDSHAKE_TIMEOUT
+        relay_notice = await _async_receive_from(
+            relay_endpoint, agent, _HANDSHAKE_TIMEOUT, "relay_channel"
         )
         _require_success(_parse_response(relay_notice), "relay_channel")
 
-        session = _PtcSession()
+        agent_session = _PtcSession()
         await relay_endpoint.async_sendto(
-            session.build(b"\x00\x03\x01\x00", sync=True), agent
+            agent_session.build(b"\x00\x03\x01\x00", sync=True), agent
         )
-        sync_packet, _source = await relay_endpoint.async_recvfrom(
-            _HANDSHAKE_TIMEOUT
+        agent_sync = await _async_expect_ptcp(
+            relay_endpoint, agent, agent_session, 0x00, "agent_sync"
         )
-        sync_body = session.receive(sync_packet)
-        if not sync_body or sync_body[0] != 0:
-            raise ImouP2PError("ptcp_sync")
-        device_endpoint.close()
+        if agent_sync != b"\x00\x03\x01\x00":
+            raise ImouP2PError("agent_sync")
+        await relay_endpoint.async_sendto(
+            agent_session.build(b"\x17" + b"\x00" * 11), agent
+        )
+        sign_body = await _async_expect_ptcp(
+            relay_endpoint, agent, agent_session, 0x18, "agent_sign"
+        )
+        if not 12 < len(sign_body) <= 4096:
+            raise ImouP2PError("agent_sign")
+        sign = sign_body[12:]
+        await relay_endpoint.async_sendto(agent_session.build(b""), agent)
+
+        device_target = await device_endpoint.async_resolve(*device_public)
+        device_host, device_port = _parse_address(
+            device_local.rsplit(",", 1)[-1], "device_local"
+        )
+        try:
+            local_bytes = struct.pack("!H", device_port) + socket.inet_aton(device_host)
+            public_bytes = struct.pack("!H", device_target[1]) + socket.inet_aton(
+                device_target[0]
+            )
+        except (OSError, struct.error) as err:
+            raise ImouP2PError("device_address") from err
+        identify_inverted = bytes(value ^ 0xFF for value in identify_bytes)
+        cookie = secrets.token_bytes(4)
+        transaction = secrets.token_bytes(12)
+        await device_endpoint.async_sendto(
+            b"\xff\xfe\xff\xe7"
+            + cookie
+            + transaction
+            + b"\x7f\xd5\xff\xf7"
+            + identify_inverted
+            + b"\xff\xfb\xff\xf7\xff\xfe"
+            + bytes(value ^ 0xFF for value in public_bytes),
+            device_target,
+        )
+        response = await _async_receive_from(
+            device_endpoint, device_target, _HANDSHAKE_TIMEOUT, "device_punch"
+        )
+        if len(response) < 20:
+            raise ImouP2PError("device_punch")
+        remote_transaction = response[8:20]
+        await device_endpoint.async_sendto(
+            b"\xfe\xfe\xff\xe7"
+            + cookie
+            + remote_transaction
+            + b"\x7f\xd6\xff\xf7"
+            + identify_inverted
+            + b"\xff\xfb\xff\xf7\xff\xfe"
+            + bytes(value ^ 0xFF for value in local_bytes),
+            device_target,
+        )
+        if authenticated:
+            await _async_receive_from(
+                device_endpoint, device_target, _HANDSHAKE_TIMEOUT, "device_punch_auth"
+            )
+            punch_auth = (
+                b"\xfe\xfe\xff\xf3"
+                + cookie
+                + remote_transaction
+                + b"\x7f\xd6\xff\xf7"
+                + identify_inverted
+                + b"\xff\xfb\xff\xf7\xff\xfe"
+                + b"\xa8\x13\x3f\x57\xfe\x37"
+            )
+            for _ in range(5):
+                await device_endpoint.async_sendto(punch_auth, device_target)
+        for _ in range(5):
+            try:
+                await _async_receive_from(
+                    device_endpoint, device_target, 1.0, "device_punch_finish"
+                )
+            except ImouP2PError as err:
+                if err.stage != "device_punch_finish":
+                    raise
+                break
+
+        device_session = _PtcSession()
+        await device_endpoint.async_sendto(
+            device_session.build(b"\x00\x03\x01\x00", sync=True), device_target
+        )
+        device_sync = await _async_expect_ptcp(
+            device_endpoint, device_target, device_session, 0x00, "device_sync"
+        )
+        if device_sync != b"\x00\x03\x01\x00":
+            raise ImouP2PError("device_sync")
+        await device_endpoint.async_sendto(
+            device_session.build(b"\x19" + b"\x00" * 11 + sign), device_target
+        )
+        await _async_expect_ptcp(
+            device_endpoint, device_target, device_session, 0x1A, "device_auth"
+        )
+        await device_endpoint.async_sendto(
+            device_session.build(b"\x1b" + b"\x00" * 11), device_target
+        )
+        await _async_expect_ptcp(
+            device_endpoint, device_target, device_session, None, "device_auth_ack"
+        )
+
         completed = True
         return _HandshakeResult(
-            endpoint=relay_endpoint,
-            agent=agent,
-            session=session,
+            endpoint=device_endpoint,
+            target=device_target,
+            session=device_session,
             remote_rtsp_port=remote_rtsp_port,
         )
     finally:
+        if relay_endpoint is not None:
+            relay_endpoint.close()
         if not completed:
             device_endpoint.close()
-            if relay_endpoint is not None:
-                relay_endpoint.close()
 
 
 class ImouP2PRelay:
     """One shared local TCP listener backed by one camera P2P session."""
+
+    _CLOSE_TIMEOUT = 5.0
 
     def __init__(self, config: ImouP2PDeviceConfig) -> None:
         self.config = config
         self.status = "idle"
         self.local_port: int | None = None
         self._endpoint: _UdpEndpoint | None = None
-        self._agent: tuple[str, int] | None = None
+        self._target: tuple[str, int] | None = None
         self._session: _PtcSession | None = None
         self._remote_rtsp_port = _DEFAULT_RTSP_PORT
         self._server: asyncio.AbstractServer | None = None
         self._start_lock = asyncio.Lock()
+        self._start_task: asyncio.Task[Any] | None = None
+        self._close_task: asyncio.Task[None] | None = None
+        self._generation = 0
         self._send_lock = asyncio.Lock()
         self._reader_task: asyncio.Task[None] | None = None
         self._heartbeat_task: asyncio.Task[None] | None = None
@@ -638,7 +905,8 @@ class ImouP2PRelay:
     def ready(self) -> bool:
         """Return whether the relay can currently accept RTSP clients."""
         return (
-            self.status == "ready"
+            not self._closing
+            and self.status == "ready"
             and self.local_port is not None
             and self._server is not None
             and self._reader_task is not None
@@ -649,71 +917,89 @@ class ImouP2PRelay:
         """Establish P2P and expose an ephemeral loopback TCP listener."""
         if self.ready:
             return
+        generation = self._generation
+        if self._close_task is not None and not self._close_task.done():
+            raise ImouP2PError("session_closed")
         async with self._start_lock:
+            if generation != self._generation:
+                raise ImouP2PError("session_closed")
             if self.ready:
                 return
-            await self.async_close()
-            self._closing = False
-            self.status = "connecting"
-            authenticated_first = self.config.p2p_type > 0
-            attempts = [authenticated_first]
-            if self.config.can_authenticate_p2p and not authenticated_first:
-                attempts.append(True)
-            if authenticated_first:
-                attempts.append(False)
-            last_error: ImouP2PError | None = None
-            result: _HandshakeResult | None = None
-            for authenticated in dict.fromkeys(attempts):
-                if authenticated and not self.config.can_authenticate_p2p:
-                    continue
-                try:
-                    result = await _async_handshake(
-                        self.config, authenticated=authenticated
-                    )
-                    break
-                except ImouP2PError as err:
-                    last_error = err
-                    if not isinstance(err, _ImouP2PAuthRequired) and len(attempts) == 1:
-                        break
-            if result is None:
-                self.status = f"error:{(last_error or ImouP2PError('handshake')).stage}"
-                raise last_error or ImouP2PError("handshake")
-            self._endpoint = result.endpoint
-            self._agent = result.agent
-            self._session = result.session
-            self._remote_rtsp_port = result.remote_rtsp_port
+            self._start_task = asyncio.current_task()
             try:
-                self._server = await asyncio.start_server(
-                    self._async_handle_client, "127.0.0.1", 0
+                await self._async_close_resources()
+                if generation != self._generation:
+                    raise ImouP2PError("session_closed")
+                self._closing = False
+                self.status = "connecting"
+                authenticated_first = self.config.p2p_type > 0
+                attempts = [authenticated_first]
+                if self.config.can_authenticate_p2p and not authenticated_first:
+                    attempts.append(True)
+                if authenticated_first:
+                    attempts.append(False)
+                last_error: ImouP2PError | None = None
+                result: _HandshakeResult | None = None
+                for authenticated in dict.fromkeys(attempts):
+                    if generation != self._generation:
+                        raise ImouP2PError("session_closed")
+                    if authenticated and not self.config.can_authenticate_p2p:
+                        continue
+                    try:
+                        result = await _async_handshake(
+                            self.config, authenticated=authenticated
+                        )
+                        break
+                    except ImouP2PError as err:
+                        last_error = err
+                        if not isinstance(err, _ImouP2PAuthRequired) and len(attempts) == 1:
+                            break
+                if result is None:
+                    self.status = f"error:{(last_error or ImouP2PError('handshake')).stage}"
+                    raise last_error or ImouP2PError("handshake")
+                self._endpoint = result.endpoint
+                self._target = result.target
+                self._session = result.session
+                self._remote_rtsp_port = result.remote_rtsp_port
+                if generation != self._generation:
+                    raise ImouP2PError("session_closed")
+                try:
+                    self._server = await asyncio.start_server(
+                        self._async_handle_client, "127.0.0.1", 0
+                    )
+                except OSError as err:
+                    self.status = "error:tcp_listen"
+                    raise ImouP2PError("tcp_listen") from err
+                if generation != self._generation:
+                    raise ImouP2PError("session_closed")
+                sockets = self._server.sockets or ()
+                if not sockets:
+                    self.status = "error:tcp_listen"
+                    raise ImouP2PError("tcp_listen")
+                self.local_port = int(sockets[0].getsockname()[1])
+                self._reader_task = asyncio.create_task(
+                    self._async_read_device(),
+                    name=f"imou_life P2P reader {self.config.serial}",
                 )
-            except OSError as err:
-                self.status = "error:tcp_listen"
-                await self.async_close()
-                raise ImouP2PError("tcp_listen") from err
-            sockets = self._server.sockets or ()
-            if not sockets:
-                self.status = "error:tcp_listen"
-                await self.async_close()
-                raise ImouP2PError("tcp_listen")
-            self.local_port = int(sockets[0].getsockname()[1])
-            self._reader_task = asyncio.create_task(
-                self._async_read_device(),
-                name=f"imou_life P2P reader {self.config.serial}",
-            )
-            self._heartbeat_task = asyncio.create_task(
-                self._async_heartbeat(),
-                name=f"imou_life P2P heartbeat {self.config.serial}",
-            )
-            self.status = "ready"
+                self._heartbeat_task = asyncio.create_task(
+                    self._async_heartbeat(),
+                    name="imou_life P2P heartbeat",
+                )
+                self.status = "ready"
+            except BaseException:
+                await self._async_close_resources()
+                raise
+            finally:
+                self._start_task = None
 
     async def _async_send_body(self, body: bytes) -> None:
         endpoint = self._endpoint
-        agent = self._agent
+        target = self._target
         session = self._session
-        if endpoint is None or agent is None or session is None:
+        if endpoint is None or target is None or session is None:
             raise ImouP2PError("session_closed")
         async with self._send_lock:
-            await endpoint.async_sendto(session.build(body), agent)
+            await endpoint.async_sendto(session.build(body), target)
 
     async def _async_read_device(self) -> None:
         endpoint = self._endpoint
@@ -722,16 +1008,16 @@ class ImouP2PRelay:
             return
         try:
             while not self._closing:
-                packet, _source = await endpoint.async_recvfrom()
-                if not packet.startswith(b"PTCP"):
+                packet, source = await endpoint.async_recvfrom()
+                if source != self._target or not packet.startswith(b"PTCP"):
                     continue
                 async with self._send_lock:
                     body = session.receive(packet)
                     if body:
-                        agent = self._agent
-                        if agent is None:
+                        target = self._target
+                        if target is None:
                             raise ImouP2PError("session_closed")
-                        await endpoint.async_sendto(session.build(b""), agent)
+                        await endpoint.async_sendto(session.build(b""), target)
                 if not body:
                     continue
                 packet_type = body[0]
@@ -788,9 +1074,8 @@ class ImouP2PRelay:
         try:
             while not self._closing:
                 await asyncio.sleep(_HEARTBEAT_SECONDS)
-                await self._async_send_body(
-                    b"\x13\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
-                )
+                if not self._closing:
+                    await self._async_send_body(b"\x13" + b"\x00" * 11)
         except asyncio.CancelledError:
             raise
         except ImouP2PError as err:
@@ -801,6 +1086,10 @@ class ImouP2PRelay:
     async def _async_handle_client(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
+        if self._closing:
+            writer.close()
+            writer.transport.abort()
+            return
         task = asyncio.current_task()
         if task is not None:
             self._client_tasks.add(task)
@@ -832,29 +1121,42 @@ class ImouP2PRelay:
             for pending_task in pending:
                 pending_task.cancel()
             await asyncio.gather(*done, *pending, return_exceptions=True)
-        except (TimeoutError, ImouP2PError):
-            pass
+        except (TimeoutError, ImouP2PError) as err:
+            stage = err.stage if isinstance(err, ImouP2PError) else "rtsp_connect_timeout"
+            self.status = f"error:{stage}"
+            _LOGGER.warning("Imou P2P TCP connection failed stage=%s", stage)
         finally:
-            for io_task in io_tasks:
-                if not io_task.done():
-                    io_task.cancel()
-            if io_tasks:
-                await asyncio.gather(*io_tasks, return_exceptions=True)
-            self._client_queues.pop(realm, None)
-            self._client_writers.pop(realm, None)
-            self._connect_waiters.pop(realm, None)
-            if self._session is not None and not self._closing:
-                with suppress(ImouP2PError):
-                    await self._async_send_body(
-                        b"\x12\x00\x00\x00"
-                        + struct.pack("!L", realm)
-                        + b"\x00\x00\x00\x00DISC"
-                    )
-            writer.close()
-            with suppress(Exception):
-                await writer.wait_closed()
-            if task is not None:
-                self._client_tasks.discard(task)
+            if not waiter.done():
+                waiter.cancel()
+            try:
+                for io_task in io_tasks:
+                    if not io_task.done():
+                        io_task.cancel()
+                if io_tasks:
+                    await asyncio.gather(*io_tasks, return_exceptions=True)
+                if self._session is not None and not self._closing:
+                    with suppress(ImouP2PError):
+                        await self._async_send_body(
+                            b"\x12\x00\x00\x00"
+                            + struct.pack("!L", realm)
+                            + b"\x00\x00\x00\x00DISC"
+                        )
+            finally:
+                writer.close()
+                try:
+                    async with asyncio.timeout(self._CLOSE_TIMEOUT):
+                        await writer.wait_closed()
+                except (TimeoutError, OSError):
+                    writer.transport.abort()
+                except asyncio.CancelledError:
+                    writer.transport.abort()
+                    raise
+                finally:
+                    self._client_queues.pop(realm, None)
+                    self._client_writers.pop(realm, None)
+                    self._connect_waiters.pop(realm, None)
+                    if task is not None:
+                        self._client_tasks.discard(task)
 
     async def _async_client_reader(
         self, reader: asyncio.StreamReader, realm: int
@@ -903,12 +1205,36 @@ class ImouP2PRelay:
 
     async def async_close(self) -> None:
         """Stop the listener, clients, heartbeat, and P2P socket."""
+        if self._close_task is None or self._close_task.done():
+            self._generation += 1
+            self._closing = True
+            if self._start_task is not None:
+                self._start_task.cancel()
+            self._close_task = asyncio.create_task(
+                self._async_close_locked(), name="imou_life P2P close"
+            )
+        close_task = self._close_task
+        cancelled = False
+        while not close_task.done():
+            try:
+                await asyncio.shield(close_task)
+            except asyncio.CancelledError:
+                cancelled = True
+        close_task.result()
+        if cancelled:
+            raise asyncio.CancelledError
+
+    async def _async_close_locked(self) -> None:
+        async with self._start_lock:
+            await self._async_close_resources()
+
+    async def _async_close_resources(self) -> None:
         self._closing = True
         server = self._server
         self._server = None
+        self.local_port = None
         if server is not None:
             server.close()
-            await server.wait_closed()
         current = asyncio.current_task()
         tasks = [
             task
@@ -918,23 +1244,38 @@ class ImouP2PRelay:
         self._reader_task = None
         self._heartbeat_task = None
         tasks.extend(task for task in self._client_tasks if task is not current)
+        self._fail_clients(None)
+        writers = tuple(self._client_writers.values())
         for task in tasks:
             task.cancel()
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
-        self._client_tasks.clear()
-        self._fail_clients(None)
-        self._client_queues.clear()
-        self._client_writers.clear()
-        self._connect_waiters.clear()
-        if self._endpoint is not None:
-            self._endpoint.close()
-        self._endpoint = None
-        self._agent = None
-        self._session = None
-        self.local_port = None
-        if not self.status.startswith("error:"):
-            self.status = "closed"
+        results: list[Any] = []
+        try:
+            async with asyncio.timeout(self._CLOSE_TIMEOUT * 2):
+                if tasks:
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+                if server is not None:
+                    await server.wait_closed()
+        except TimeoutError as err:
+            for writer in writers:
+                writer.transport.abort()
+            raise ImouP2PError("close_timeout") from err
+        finally:
+            self._client_tasks.clear()
+            self._client_queues.clear()
+            self._client_writers.clear()
+            self._connect_waiters.clear()
+            if self._endpoint is not None:
+                self._endpoint.close()
+            self._endpoint = None
+            self._target = None
+            self._session = None
+            if not self.status.startswith("error:"):
+                self.status = "closed"
+        for result in results:
+            if isinstance(result, BaseException) and not isinstance(
+                result, asyncio.CancelledError
+            ):
+                raise result
 
 
 RelayFactory = Callable[[ImouP2PDeviceConfig], ImouP2PRelay]

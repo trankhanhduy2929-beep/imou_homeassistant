@@ -1,13 +1,20 @@
 {
   "domain": "imou_life",
   "name": "Imou Life",
-  "codeowners": ["@trankhanhduy2929-beep"],
+  "codeowners": [
+    "@trankhanhduy2929-beep"
+  ],
   "config_flow": true,
-  "dependencies": ["http", "stream"],
+  "dependencies": [
+    "http",
+    "stream"
+  ],
   "documentation": "https://github.com/trankhanhduy2929-beep/imou_homeassistant",
   "integration_type": "hub",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/trankhanhduy2929-beep/imou_homeassistant/issues",
-  "requirements": ["aiomqtt==2.5.1"],
-  "version": "0.1.14"
+  "requirements": [
+    "aiomqtt==2.5.1"
+  ],
+  "version": "0.1.15"
 }

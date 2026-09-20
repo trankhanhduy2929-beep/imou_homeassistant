@@ -60,6 +60,12 @@ Sau khi kết nối MQTT, integration đăng ký nhận sự kiện trực tiế
 Motion/person được đẩy tới gần như ngay thay vì chờ chu kỳ poll 30 giây; polling vẫn giữ
 làm dự phòng khi MQTT tạm mất.
 
+## RTSP trên LAN
+
+Vào **Settings → Devices & services → Imou Life → Configure**, nhập IP camera trong cùng
+LAN để dùng RTSP trực tiếp (không cần P2P). Khi thiết bị không ở cùng LAN hoặc không nhập IP,
+integration fallback sang P2P/cloud như trước.
+
 ## Tính năng theo thiết bị
 
 - Một số property do model thiết bị khai báo nhưng cloud không trả giá trị sẽ hiển thị `unknown`/`unavailable`; đây là giới hạn phía Imou, không phải lỗi cài đặt.
@@ -101,6 +107,7 @@ Khi báo lỗi, gửi log Home Assistant và thuộc tính chẩn đoán. **Khô
 - Các trường hợp dữ liệu bị chia nhiều chunk, UTF-8 và giới hạn kích thước được kiểm thử tự động.
 - Motion/person kích hoạt vật lý có thể chưa được xác minh đầy đủ trên mọi model; hãy tự kiểm tra với camera của bạn.
 - Kiểm thử được thực hiện với tài khoản người dùng cung cấp; không đưa thông tin tài khoản lên repo.
+- Camera LAN `192.168.5.155` phát được 2304×1296 HEVC 5 frame trong 0.08s qua RTSP TCP và ONVIF kết nối được. Motion/person kích hoạt vật lý có thể chưa được xác minh đầy đủ trên mọi model; hãy tự kiểm tra với camera của bạn.
 
 ## Ghi nhận
 

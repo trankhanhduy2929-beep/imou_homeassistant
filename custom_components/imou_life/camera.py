@@ -16,7 +16,13 @@ from .api import ImouApiError
 from .entity import ImouChannelEntity, async_setup_dynamic_entities
 from .media import extract_image_url, extract_stream_url
 from .models import ImouChannel, ImouDevice, is_online_status
-from .p2p import ImouP2PError, ImouP2PRelayManager
+from .p2p import (
+    ImouP2PError,
+    ImouP2PRelayManager,
+    build_local_rtsp_url,
+    p2p_config_from_device,
+    rtsp_channel_number,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -120,11 +126,20 @@ class ImouLifeCamera(ImouChannelEntity, Camera):
             return None
 
     async def stream_source(self) -> str | None:
-        """Prefer a local P2P RTSP relay, then fall back to a cloud URL."""
+        """Prefer a direct LAN RTSP URL, then a local P2P relay, then cloud."""
         channel = self.channel
         device = self.device
         if channel is None or device is None:
             return None
+        entry = getattr(self.coordinator, "config_entry", None)
+        options = getattr(entry, "options", {}) or {}
+        local_host = str((options.get("local_host") or {}).get("default", "")).strip()
+        if local_host:
+            config = p2p_config_from_device(device)
+            if config.rtsp_username and config.rtsp_password:
+                return build_local_rtsp_url(
+                    config, local_host, rtsp_channel_number(device, channel)
+                )
         try:
             return await self._p2p.async_stream_url(device, channel)
         except ImouP2PError as err:
