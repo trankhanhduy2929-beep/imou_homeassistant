@@ -781,10 +781,9 @@ class ImouLifeOptionsFlow(config_entries.OptionsFlow):
                 vol.Required(CONF_LOCAL_HOST, default=defaults[CONF_LOCAL_HOST]): str,
                 vol.Required(
                     CONF_RTSP_PORT,
-                    default=str(defaults[CONF_RTSP_PORT]),
+                    default=defaults[CONF_RTSP_PORT],
                 ): vol.All(
                     vol.Coerce(str),
-                    vol.Match(r"^[0-9]{1,5}$"),
                     vol.Coerce(int),
                     vol.Range(min=1, max=65535),
                 ),
