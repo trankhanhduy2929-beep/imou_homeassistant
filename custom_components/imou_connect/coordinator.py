@@ -129,10 +129,14 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
         self, device: ImouDevice, previous: ImouDevice | None
     ) -> ImouDevice:
         """Attach a cached thing model and current primitive property values."""
-        model = self._model_cache.get(device.product_id)
+        model = (
+            self._model_cache.get(device.product_id) if device.product_id else None
+        )
         if model is None and previous is not None:
             model = previous.thing_model
-        if model is None or not (model.properties or model.services):
+        if not device.product_id:
+            model = model or device.thing_model
+        elif model is None or not (model.properties or model.services):
             try:
                 response = await self.api.async_query_model(device.product_id)
                 model = parse_thing_model(

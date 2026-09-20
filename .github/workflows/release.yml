@@ -19,14 +19,14 @@ jobs:
       - name: Read version
         id: version
         run: |
-          INTEGRATION_VERSION="$(python3 -c "import json;print(json.load(open('custom_components/imou_life/manifest.json'))['version'])")"
+          INTEGRATION_VERSION="$(python3 -c "import json;print(json.load(open('custom_components/imou_connect/manifest.json'))['version'])")"
           echo "integration=$INTEGRATION_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Build integration archive
         run: |
           mkdir -p dist
-          zip -r "dist/imou_life-custom-component-${{ steps.version.outputs.integration }}.zip" \
-            custom_components/imou_life -x '*/__pycache__/*' '*.pyc'
+          zip -r "dist/imou_connect-custom-component-${{ steps.version.outputs.integration }}.zip" \
+            custom_components/imou_connect -x '*/__pycache__/*' '*.pyc'
 
       - name: Checksums
         run: |
@@ -37,7 +37,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: imou-life-archive
+          name: imou-connect-archive
           path: dist/*
 
       - name: Publish release assets

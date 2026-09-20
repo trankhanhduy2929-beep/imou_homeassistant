@@ -34,7 +34,7 @@ from .const import (
     PROTOCOL_VERSION,
     SIGNATURE_REVISION,
 )
-from .models import ImouDevice, device_from_api
+from .models import ImouDevice, _api_identifier, as_bool, device_from_api
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -861,6 +861,8 @@ class ImouApiClient:
         self._live_diagnostics: dict[tuple[str, str, str, str], str] = {}
         self._latest_alarm_status = "not_requested"
         self._iot_control_modes: dict[tuple[str, str, str], str] = {}
+        self._family_ids: tuple[str, ...] = ()
+        self._family_cache_expires = 0.0
 
     @staticmethod
     def _normalize_base_url(value: str) -> str:
@@ -1977,22 +1979,56 @@ class ImouApiClient:
 
     async def async_list_devices(self) -> list[ImouDevice]:
         """Discover rich home devices and channels with legacy fallbacks."""
-        try:
-            raw_devices = await self._list_device_basic_info()
-        except ImouApiError:
+        last_error: ImouApiError | None = None
+        for list_devices in (
+            self._list_device_basic_info,
+            self._list_basic_devices,
+            self._list_legacy_devices,
+        ):
             try:
-                raw_devices = await self._list_basic_devices()
-            except ImouApiError:
-                raw_devices = await self._list_legacy_devices()
-        devices: list[ImouDevice] = []
-        seen: set[tuple[str, str]] = set()
-        for raw in raw_devices:
-            device = device_from_api(raw)
-            if device is None or (device.product_id, device.device_id) in seen:
+                raw_devices = await list_devices()
+            except ImouAuthError:
+                raise
+            except ImouApiError as err:
+                last_error = err
                 continue
-            seen.add((device.product_id, device.device_id))
-            devices.append(device)
-        return devices
+            last_error = None
+            merged: dict[str, dict[str, Any]] = {}
+            for raw in raw_devices:
+                if not isinstance(raw, Mapping):
+                    continue
+                device_id = _api_identifier(raw, "deviceId", "deviceid")
+                if not device_id:
+                    continue
+                record = merged.setdefault(device_id, {})
+                for key, value in raw.items():
+                    if key in ("channelList", "channels") and isinstance(value, list):
+                        previous = record.get(key)
+                        record[key] = (
+                            previous if isinstance(previous, list) else []
+                        ) + [
+                            channel
+                            if _api_identifier(channel, "channelId", "channelid")
+                            else {**channel, "channelId": str(index)}
+                            for index, channel in enumerate(value)
+                            if isinstance(channel, Mapping)
+                        ]
+                    elif (
+                        record.get(key) in (None, "", [], {})
+                        or key in ("productId", "productid")
+                        and not _api_identifier(record, key)
+                    ):
+                        record[key] = value
+            devices = [
+                device
+                for raw in merged.values()
+                if (device := device_from_api(raw)) is not None
+            ]
+            if devices:
+                return devices
+        if last_error is not None:
+            raise last_error
+        return []
 
     async def async_get_latest_alarms(
         self, devices: list[ImouDevice]
@@ -2126,98 +2162,145 @@ class ImouApiClient:
         """Return the safe status of the most recent cloud alarm poll."""
         return self._latest_alarm_status
 
+    async def _list_family_ids(self) -> tuple[str, ...]:
+        if time.monotonic() < self._family_cache_expires:
+            return self._family_ids
+        try:
+            data = await self.async_request(
+                "family.manager.UserFamilyGet", "201076", {"_nouse": 0}
+            )
+        except ImouAuthError:
+            raise
+        except ImouApiError as err:
+            _LOGGER.debug("Imou family enumeration unavailable code=%s", err.code)
+            self._family_cache_expires = time.monotonic() + 60
+            return self._family_ids
+        family_ids: dict[str, None] = {}
+        for key in ("families", "joinFamilies", "joinedFamilies"):
+            families = data.get(key)
+            if not isinstance(families, list):
+                continue
+            for family in families:
+                if not isinstance(family, Mapping):
+                    continue
+                family_id = _api_identifier(family, "familyId")
+                if family_id:
+                    family_ids[family_id] = None
+                if len(family_ids) >= 32:
+                    break
+            if len(family_ids) >= 32:
+                break
+        self._family_ids = tuple(family_ids)
+        self._family_cache_expires = time.monotonic() + 300
+        return self._family_ids
+
     async def _list_device_basic_info(self) -> list[Mapping[str, Any]]:
         devices: list[Mapping[str, Any]] = []
-        seen: set[str] = set()
-        family_ids = [""]
-        try:
-            family_data = await self.async_request(
-                "family.manager.UserFamilyGet",
-                "201076",
-                {"_nouse": 0},
-            )
-            families = family_data.get("families") or []
-            if isinstance(families, list):
-                for family in families[:8]:
-                    if isinstance(family, Mapping):
-                        family_id = str(family.get("familyId") or "").strip()
-                        if family_id:
-                            family_ids.append(family_id)
-        except ImouApiError:
-            pass
-        for family_id in family_ids:
-            offset = 0
-            transfer = ""
-            for _ in range(20):
-                data = await self.async_request(
-                    "device.list.DeviceBasicInfoQueryV2",
-                    "",
-                    {
-                        "familyId": family_id,
-                        "groupId": "-1",
-                        "limit": 64,
-                        "needNewSecret": True,
-                        "offset": offset,
-                        "transferStr": transfer,
-                    },
+        last_error: ImouApiError | None = None
+        for family_id in ("", *(await self._list_family_ids())):
+            try:
+                devices.extend(
+                    await self._list_device_pages(
+                        "device.list.DeviceBasicInfoQueryV2",
+                        "",
+                        {
+                            "familyId": family_id,
+                            "groupId": "-1",
+                            "limit": 64,
+                            "needNewSecret": True,
+                        },
+                    )
                 )
-                items = data.get("deviceList") or []
-                if isinstance(items, list):
-                    for item in items:
-                        if isinstance(item, Mapping):
-                            key = str(item.get("deviceId") or "")
-                            if key and key not in seen:
-                                seen.add(key)
-                                devices.append(item)
-                if not data.get("hasNextPage"):
-                    break
-                offset += len(items)
-                transfer = str(data.get("transferStr") or "")
+            except ImouAuthError:
+                raise
+            except ImouApiError as err:
+                last_error = err
+                _LOGGER.debug("Imou device family unavailable code=%s", err.code)
+        if not devices and last_error is not None:
+            raise last_error
         return devices
 
-    async def _list_basic_devices(self) -> list[Mapping[str, Any]]:
+    async def _list_device_pages(
+        self,
+        api: str,
+        revision: str,
+        payload: Mapping[str, Any],
+        *,
+        legacy: bool = False,
+    ) -> list[Mapping[str, Any]]:
         devices: list[Mapping[str, Any]] = []
+        seen: set[tuple[str, str, str]] = set()
         offset = 0
         transfer = ""
         for _ in range(20):
-            data = await self.async_request(
-                "device.list.BasicList",
-                "199828",
-                {
-                    "familyId": "",
-                    "groupId": "-1",
-                    "limit": 128,
-                    "offset": offset,
-                    "transferStr": transfer,
-                },
+            pagination = (
+                {"pageId": offset}
+                if legacy
+                else {"offset": offset, "transferStr": transfer}
             )
-            items = data.get("deviceList") or []
-            if isinstance(items, list):
-                devices.extend(item for item in items if isinstance(item, Mapping))
-            if not data.get("hasNextPage"):
-                break
-            offset += len(items)
-            transfer = str(data.get("transferStr") or "")
-        return devices
-
-    async def _list_legacy_devices(self) -> list[Mapping[str, Any]]:
-        devices: list[Mapping[str, Any]] = []
-        page_id = 0
-        for _ in range(20):
-            data = await self.async_request(
-                "things.model.DeviceListPageGet",
-                "3421",
-                {"limit": 100, "pageId": page_id, "type": ""},
-            )
-            items = data.get("item") or []
+            try:
+                data = await self.async_request(api, revision, {**payload, **pagination})
+            except ImouAuthError:
+                raise
+            except ImouApiError:
+                if devices:
+                    break
+                raise
+            items = data.get("item" if legacy else "deviceList")
             if not isinstance(items, list) or not items:
                 break
-            devices.extend(item for item in items if isinstance(item, Mapping))
-            next_page = max((int(item.get("pageId") or 0) for item in items), default=0)
-            if next_page <= page_id:
+            page_keys: set[tuple[str, str, str]] = set()
+            for item in items:
+                if not isinstance(item, Mapping):
+                    continue
+                device = device_from_api(item)
+                if device is None:
+                    continue
+                devices.append(item)
+                page_keys.update(
+                    (device.device_id, device.product_id, channel.channel_id)
+                    for channel in device.channels
+                )
+            if not page_keys - seen:
                 break
-            page_id = next_page
+            seen.update(page_keys)
+            if legacy:
+                if as_bool(data.get("hasNextPage")) is False:
+                    break
+                next_page = offset
+                for item in items:
+                    if not isinstance(item, Mapping):
+                        continue
+                    try:
+                        cursor = int(_api_identifier(item, "pageId"))
+                    except ValueError:
+                        continue
+                    next_page = max(next_page, cursor)
+                if next_page <= offset:
+                    break
+                offset = next_page
+            else:
+                if as_bool(data.get("hasNextPage")) is not True:
+                    break
+                offset += len(items)
+                value = data.get("transferStr")
+                transfer = value if isinstance(value, str) else ""
         return devices
+
+    async def _list_basic_devices(self) -> list[Mapping[str, Any]]:
+        return await self._list_device_pages(
+            "device.list.BasicList",
+            "199828",
+            {"familyId": "", "groupId": "-1", "limit": 128},
+        )
+
+    async def _list_legacy_devices(self) -> list[Mapping[str, Any]]:
+        return await self._list_device_pages(
+            "things.model.DeviceListPageGet",
+            "3421",
+            {"limit": 100, "type": ""},
+            legacy=True,
+        )
 
     async def async_query_model(
         self, product_id: str, md5_value: str = ""

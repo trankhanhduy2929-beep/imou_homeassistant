@@ -1,6 +1,6 @@
 {
-  "domain": "imou_life",
-  "name": "Imou Life",
+  "domain": "imou_connect",
+  "name": "Imou Connect",
   "codeowners": [
     "@trankhanhduy2929-beep"
   ],
@@ -16,5 +16,5 @@
   "requirements": [
     "aiomqtt==2.5.1"
   ],
-  "version": "0.1.16"
+  "version": "0.1.17"
 }

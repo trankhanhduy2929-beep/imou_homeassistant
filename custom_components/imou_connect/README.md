@@ -1,43 +1,54 @@
-# Imou Life custom integration
+# Imou Connect custom integration
 
 Custom integration này đăng nhập trực tiếp Imou Life bằng account/password theo profile Android của APK `10.1.6`. Không cần add-on hoặc MQTT broker.
 
 ## Cài đặt
 
-1. Giải nén gói phát hành vào `/config` để có thư mục `/config/custom_components/imou_life`.
+1. Giải nén gói phát hành vào `/config` để có thư mục `/config/custom_components/imou_connect`.
 2. Restart Home Assistant.
-3. Mở **Settings → Devices & services → Add integration → Imou Life**.
+3. Mở **Settings → Devices & services → Add integration → Imou Connect**.
 4. Nhập tài khoản và mật khẩu Imou Life.
 5. Nếu Imou yêu cầu CAPTCHA, mở liên kết xác minh do config flow hiển thị. Với mã `12112`, nhập mã SMS/email sáu số ở bước tiếp theo.
 
-**Nâng cấp lên `0.1.16`:** giải nén `imou_life-custom-component-0.1.16.zip`, chép đè mã trong `/config/custom_components/imou_life`, rồi restart Home Assistant; giữ nguyên config entry và cấu hình hiện có.
+**Nâng cấp lên `0.1.17`:** giải nén `imou_connect-custom-component-0.1.17.zip`, chép đè mã trong `/config/custom_components/imou_connect`, rồi restart Home Assistant; giữ nguyên config entry và cấu hình hiện có.
 
-Bản `0.1.16`:
+Bản `0.1.17`:
+
+- **Camera tách khỏi setup mặc định:** login chỉ tạo sensors/settings/entities, không probe P2P nên không treo khi thêm integration.
+- **RTSP local tuỳ chọn:** vào **Settings → Imou Connect → Configure** chọn từng camera và nhập IP, cổng và tài khoản RTSP local; camera entity chỉ được tạo khi có cấu hình hợp lệ.
+- **Discovery lấy `familyId` thật** qua `family.manager.UserFamilyGet` trước `DeviceBasicInfoQueryV2`, sửa lỗi account có family riêng không thấy thiết bị.
+- **P2P credential parsing sửa**: đọc đúng `p2pConfig.accountNew`/`p2pToken`/`ak`.
+- **P2P handshake theo tham chiếu**: agent sign → device auth, đúng PTCP counter và cleanup.
+- **MQTT alarm push**: đăng ký `SetClientPushConfig` nhận sự kiện gần như tức thời.
+- **HTTP body fix**: đọc đến EOF, không cắt JSON.
+- **Đổi tên domain:** `imou_life` → `imou_connect` để tránh trùng integration khác; migration cần xóa entry cũ và đăng nhập lại.
+
+**Nâng cấp lên `0.1.16`:** giải nén `imou_connect-custom-component-0.1.16.zip`, chép đè mã trong `/config/custom_components/imou_connect`, rồi restart Home Assistant; giữ nguyên config entry và cấu hình hiện có.
 
 - **Tách camera khỏi setup mặc định:** login chỉ tạo sensors/settings/entities, không probe P2P nên không treo khi thêm integration.
-- **RTSP local tuỳ chọn:** vào **Settings → Imou Life → Configure** nhập IP camera trong cùng LAN để dùng RTSP trực tiếp; camera entity chỉ được tạo khi có IP.
+- **RTSP local tuỳ chọn:** vào **Settings → Imou Connect → Configure** chọn từng camera và nhập IP, cổng và tài khoản RTSP local; camera entity chỉ được tạo khi có cấu hình hợp lệ.
 - **Discovery lấy `familyId` thật** qua `family.manager.UserFamilyGet` trước `DeviceBasicInfoQueryV2`, sửa lỗi account có family riêng không thấy thiết bị.
 - **P2P credential parsing sửa**: đọc đúng `p2pConfig.accountNew`/`p2pToken`/`ak`.
 - **P2P handshake theo tham chiếu**: agent sign → device auth, đúng PTCP counter và cleanup.
 - **MQTT alarm push**: đăng ký `SetClientPushConfig` nhận sự kiện gần như tức thời.
 - **HTTP body fix**: đọc đến EOF, không cắt JSON.
 
-**Nâng cấp lên `0.1.15`:** giải nén `imou_life-custom-component-0.1.15.zip`, chép đè mã trong `/config/custom_components/imou_life`, rồi restart Home Assistant; giữ nguyên config entry và cấu hình hiện có.
+**Nâng cấp lên `0.1.15`:** giải nén `imou_connect-custom-component-0.1.15.zip`, chép đè mã trong `/config/custom_components/imou_connect`, rồi restart Home Assistant; giữ nguyên config entry và cấu hình hiện có.
 
 Bản `0.1.15` có:
 
-- **OptionsFlow** để nhập IP camera trong cùng LAN; camera ưu tiên RTSP trực tiếp trên LAN khi có IP, fallback P2P/cloud khi cần. Vào **Settings → Devices & services → Imou Life → Configure → nhập IP camera**.
+- **OptionsFlow** để nhập IP camera trong cùng LAN; camera ưu tiên RTSP trực tiếp trên LAN khi có IP, fallback P2P/cloud khi cần. Vào **Settings → Devices & services → Imou Connect → Configure → nhập IP camera**.
 - Discovery lấy `familyId` thật qua `family.manager.UserFamilyGet` trước `DeviceBasicInfoQueryV2`, sửa lỗi account có family riêng không thấy camera/thiết bị.
 - Credential P2P đọc đúng `p2pConfig.accountNew`/`p2pToken`/`ak` thay vì chỉ `account`/`password` cũ.
 - P2P handshake theo tham chiếu Dahua/Imou: agent sign → device auth, đúng PTCP counter và cleanup; camera nhà dưới phát được 2304×1296 HEVC 5 frame trong 0.08s qua RTSP LAN.
 - MQTT alarm push đăng ký `SetClientPushConfig` nhận sự kiện gần như tức thời (đã kiểm thử trên cloud thật: 6 sự kiện trong 90 giây).
 - HTTP body đọc đến EOF, không cắt JSON.
 
-**Nâng cấp lên `0.1.14`:** giải nén `imou_life-custom-component-0.1.14.zip`, chép đè mã trong `/config/custom_components/imou_life`, rồi restart Home Assistant; giữ nguyên config entry và cấu hình hiện có.
+**Nâng cấp lên `0.1.14`:** giải nén `imou_connect-custom-component-0.1.14.zip`, chép đè mã trong `/config/custom_components/imou_connect`, rồi restart Home Assistant; giữ nguyên config entry và cấu hình hiện có.
 
 Bản `0.1.14` đăng ký client nhận alarm qua MQTT giống app Android: sau khi kết nối, integration gọi `user.push.SetClientPushConfig` với `mqttPushId` là client-id MQTT, nên Imou đẩy sự kiện trực tiếp thay vì chờ chu kỳ poll 30 giây. Kiểm thử cloud thật (chỉ đọc): đăng ký được chấp nhận và MQTT nhận 6 sự kiện trong 90 giây, so với 0 sự kiện khi chưa đăng ký. Poll vẫn giữ làm dự phòng khi MQTT push tạm mất.
 
-**Nâng cấp lên `0.1.13`:** giải nén `imou_life-custom-component-0.1.13.zip`, chép đè mã trong `/config/custom_components/imou_life`, rồi restart Home Assistant; giữ nguyên config entry và cấu hình hiện có, không xóa entry hoặc đăng nhập lại để nâng cấp. Các bước thêm integration ở trên chỉ dành cho cài mới.
+**Nâng cấp lên `0.1.13`:** giải nén `imou_connect-custom-component-0.1.13.zip`, chép đè mã trong `/config/custom_components/imou_connect`, rồi restart Home Assistant; giữ nguyên config entry và cấu hình hiện có, không xóa entry hoặc đăng nhập lại để nâng cấp. Các bước thêm integration ở trên chỉ dành cho cài mới.
 
 Bản `0.1.13` sửa HTTP body bị cắt khi truyền nhiều chunk: đọc `response.content` đến EOF, giới hạn JSON 16 MiB và snapshot 5 MiB. Bộ 144 test đã đạt, gồm kiểm thử tổng hợp chunk, ký tự UTF-8 bị chia giữa các chunk và giới hạn kích thước.
 
@@ -55,7 +66,7 @@ Bản `0.1.11` chuyển fallback motion/person sang đúng API APK `cloud.messag
 
 Nếu P2P không thiết lập được, camera thử lần lượt `RTSP`, `HLS`, `FLV`, `RTMP`, transfer API và service `cm_getRealTransferStreamUrl` ref `96500`; input/output service được đổi sang ref `96501`–`96529`. Thuộc tính `stream_status` cho biết URL cloud chuẩn phát được hay Imou chỉ trả private transport. `RTSV1`/`RTSV2`/`lchttp` không được quảng cáo trực tiếp cho Home Assistant; relay P2P là đường phát cục bộ thay thế.
 
-Bản `0.1.7` kết nối trực tiếp MQTT TLS do Imou cấp sau khi đăng nhập và tạo hai binary sensor realtime cho từng channel: **Chuyển động** và **Phát hiện người**. Human-event cũng bật sensor chuyển động; mỗi trạng thái tự trở về off sau 30 giây nếu cloud không gửi sự kiện clear. Payload automation được phát trên Home Assistant event bus với tên `imou_life_event`; URL ảnh và giá trị nhạy cảm bị loại khỏi payload.
+Bản `0.1.7` kết nối trực tiếp MQTT TLS do Imou cấp sau khi đăng nhập và tạo hai binary sensor realtime cho từng channel: **Chuyển động** và **Phát hiện người**. Human-event cũng bật sensor chuyển động; mỗi trạng thái tự trở về off sau 30 giây nếu cloud không gửi sự kiện clear. Payload automation được phát trên Home Assistant event bus với tên `imou_connect_event`; URL ảnh và giá trị nhạy cảm bị loại khỏi payload.
 
 Hai binary sensor realtime vẫn available khi MQTT Imou mất kết nối nhờ fallback polling. Camera cần bật phát hiện/chuyển động và thông báo sự kiện trong Imou Life; `motionEnable` hoặc `humanEnable` vẫn là công tắc cấu hình, không bị dùng làm trạng thái chuyển động giả.
 
@@ -67,7 +78,7 @@ Bản `0.1.5` đã sửa trạng thái `validation pending` sau OTP bằng clien
 
 ## Entity
 
-- Một camera cho mỗi channel, dùng thumbnail cloud, relay P2P RTSP nội bộ và cloud URL làm fallback.
+- Camera cho mỗi channel được cấu hình RTSP local (không dùng P2P; tạo qua **Configure**).
 - Connectivity binary sensor cho device và từng channel.
 - Thing-model primitive property thành `sensor`, `binary_sensor`, `switch`, `number`, `select` hoặc `text`.
 - Thing-model service không có input thành `button`.

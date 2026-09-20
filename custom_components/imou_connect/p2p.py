@@ -979,11 +979,11 @@ class ImouP2PRelay:
                 self.local_port = int(sockets[0].getsockname()[1])
                 self._reader_task = asyncio.create_task(
                     self._async_read_device(),
-                    name=f"imou_life P2P reader {self.config.serial}",
+                    name=f"imou_connect P2P reader {self.config.serial}",
                 )
                 self._heartbeat_task = asyncio.create_task(
                     self._async_heartbeat(),
-                    name="imou_life P2P heartbeat",
+                    name="imou_connect P2P heartbeat",
                 )
                 self.status = "ready"
             except BaseException:
@@ -1211,7 +1211,7 @@ class ImouP2PRelay:
             if self._start_task is not None:
                 self._start_task.cancel()
             self._close_task = asyncio.create_task(
-                self._async_close_locked(), name="imou_life P2P close"
+                self._async_close_locked(), name="imou_connect P2P close"
             )
         close_task = self._close_task
         cancelled = False

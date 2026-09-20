@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Final
 
-DOMAIN: Final = "imou_life"
+DOMAIN: Final = "imou_connect"
 
 CONF_ACCOUNT: Final = "account"
 CONF_PASSWORD: Final = "password"
@@ -16,6 +16,13 @@ CONF_MAX_PROPERTIES: Final = "max_properties"
 CONF_VALID_CODE: Final = "valid_code"
 CONF_RESEND_CODE: Final = "resend_code"
 CONF_LOCAL_HOST: Final = "local_host"
+CONF_LOCAL_CAMERAS: Final = "local_cameras"
+CONF_CAMERA_ID: Final = "camera_id"
+CONF_LOCAL_USERNAME: Final = "local_username"
+CONF_LOCAL_PASSWORD: Final = "local_password"
+CONF_RTSP_PORT: Final = "rtsp_port"
+CONF_RTSP_PATH: Final = "rtsp_path"
+CONF_REMOVE_CAMERA: Final = "remove_camera"
 
 DEFAULT_POLL_INTERVAL: Final = 30
 DEFAULT_REQUEST_TIMEOUT: Final = 15
@@ -53,7 +60,7 @@ PLATFORM_NAMES: Final = (
 DATA_CAPTCHA_SESSIONS: Final = "captcha_sessions"
 DATA_CAPTCHA_VIEWS_REGISTERED: Final = "captcha_views_registered"
 
-CAPTCHA_BASE_PATH: Final = "/api/imou_life/captcha"
+CAPTCHA_BASE_PATH: Final = "/api/imou_connect/captcha"
 CAPTCHA_SESSION_TTL: Final = 15 * 60
 CAPTCHA_SUBMIT_MAX_BYTES: Final = 32 * 1024
 

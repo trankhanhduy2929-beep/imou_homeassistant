@@ -57,12 +57,12 @@ def geetest_config(
 def _head(base_path: str) -> str:
     return f"""<!doctype html>
 <html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<base href="{html.escape(base_path, quote=True)}"><meta name="referrer" content="no-referrer"><title>Xác minh Imou Life</title>
+<base href="{html.escape(base_path, quote=True)}"><meta name="referrer" content="no-referrer"><title>Xác minh Imou Connect</title>
 <style>:root{{color-scheme:light dark;font-family:system-ui,sans-serif}}body{{padding:24px;text-align:center}}main{{max-width:620px;margin:auto}}#captcha-shell{{min-height:330px;display:grid;place-items:center;margin:18px auto;padding:12px;border:1px solid #7775;border-radius:12px;background:#fff;color:#111}}#captcha{{width:100%;min-height:300px}}button{{border:0;border-radius:8px;padding:12px 20px;font:inherit;font-weight:600;background:#687078;color:#fff;cursor:pointer}}button:disabled{{cursor:wait;opacity:.55}}#status{{white-space:pre-wrap;min-height:52px;margin:18px 0}}.hint{{font-size:.9rem;opacity:.75}}form{{display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap}}input{{font:inherit;font-size:1.25rem;letter-spacing:.25rem;text-align:center;width:10rem;padding:10px;border:1px solid #777;border-radius:8px}}#captcha-image{{min-width:150px;min-height:50px;image-rendering:auto;background:#fff;border:10px solid #fff;border-radius:8px}}</style></head>"""
 
 
 def _intro() -> str:
-    return """<body><main><h2>Xác minh Imou Life</h2>
+    return """<body><main><h2>Xác minh Imou Connect</h2>
 <p>Hoàn tất CAPTCHA do Imou cung cấp để Home Assistant tiếp tục đăng nhập bằng account/password.</p>"""
 
 

@@ -187,7 +187,7 @@ class ImouCaptchaPageView(_TokenProtectedCaptchaView):
     """Render the active visual CAPTCHA."""
 
     url = f"{CAPTCHA_BASE_PATH}/{{web_token}}/"
-    name = "api:imou_life:captcha"
+    name = "api:imou_connect:captcha"
 
     async def get(
         self, request: web.Request, web_token: str = ""
@@ -212,7 +212,7 @@ class ImouCaptchaStatusView(_TokenProtectedCaptchaView):
     """Expose sanitized CAPTCHA progress to its browser page."""
 
     url = f"{CAPTCHA_BASE_PATH}/{{web_token}}/status"
-    name = "api:imou_life:captcha:status"
+    name = "api:imou_connect:captcha:status"
 
     async def get(
         self, request: web.Request, web_token: str = ""
@@ -234,7 +234,7 @@ class ImouCaptchaScriptView(_TokenProtectedCaptchaView):
     """Serve the GeeTest SDK asset recovered from the APK."""
 
     url = f"{CAPTCHA_BASE_PATH}/{{web_token}}/gl4.js"
-    name = "api:imou_life:captcha:script"
+    name = "api:imou_connect:captcha:script"
 
     async def get(
         self, request: web.Request, web_token: str = ""
@@ -252,7 +252,7 @@ class ImouCaptchaImageView(_TokenProtectedCaptchaView):
     """Serve a legacy four-character CAPTCHA image."""
 
     url = f"{CAPTCHA_BASE_PATH}/{{web_token}}/image"
-    name = "api:imou_life:captcha:image"
+    name = "api:imou_connect:captcha:image"
 
     async def get(
         self, request: web.Request, web_token: str = ""
@@ -335,7 +335,7 @@ class ImouCaptchaSubmitView(_CaptchaPostView):
     """Pass a browser CAPTCHA result back into the config flow."""
 
     url = f"{CAPTCHA_BASE_PATH}/{{web_token}}/submit"
-    name = "api:imou_life:captcha:submit"
+    name = "api:imou_connect:captcha:submit"
 
     async def post(
         self, request: web.Request, web_token: str = ""
@@ -360,7 +360,7 @@ class ImouCaptchaRefreshView(_CaptchaPostView):
     """Request a new challenge without exposing credentials to the browser."""
 
     url = f"{CAPTCHA_BASE_PATH}/{{web_token}}/refresh"
-    name = "api:imou_life:captcha:refresh"
+    name = "api:imou_connect:captcha:refresh"
 
     async def post(
         self, request: web.Request, web_token: str = ""

@@ -35,7 +35,15 @@ from .captcha import (
     async_update_captcha_session,
     captcha_url,
 )
+from .media import configured_local_cameras, local_camera_key, normalize_local_camera
 from .const import (
+    CONF_CAMERA_ID,
+    CONF_LOCAL_CAMERAS,
+    CONF_LOCAL_PASSWORD,
+    CONF_LOCAL_USERNAME,
+    CONF_REMOVE_CAMERA,
+    CONF_RTSP_PATH,
+    CONF_RTSP_PORT,
     CAPTCHA_RESUME_AUTHENTICATE,
     CAPTCHA_RESUME_GRANT_OTP,
     CAPTCHA_RESUME_SEND_OTP,
@@ -71,7 +79,7 @@ def _account_title(account: str) -> str:
         visible = f"••••{normalized[-4:]}"
     else:
         visible = "account"
-    return f"Imou Life ({visible})"
+    return f"Imou Connect ({visible})"
 
 
 def _two_step_delivery_text(response: Any) -> str:
@@ -98,7 +106,7 @@ class ImouLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def async_get_options_flow(
         config_entry: config_entries.ConfigEntry,
     ) -> "ImouLifeOptionsFlow":
-        return ImouLifeOptionsFlow(config_entry)
+        return ImouLifeOptionsFlow()
 
     def __init__(self) -> None:
         """Initialize transient authentication state."""
@@ -666,50 +674,130 @@ class ImouLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 class ImouLifeOptionsFlow(config_entries.OptionsFlow):
     """Allow setting a local LAN host per Imou device for direct RTSP."""
 
-    async def async_step_init(self, user_input=None):
-        config_entry = self.config_entry
-        options = dict(config_entry.options or {})
-        local = options.get(CONF_LOCAL_HOST)
-        local_host = ""
-        if isinstance(local, dict):
-            local_host = str(local.get("default", "")).strip()
-        elif isinstance(local, str):
-            local_host = local.strip()
-        if user_input is not None:
-            host = str(user_input.get(CONF_LOCAL_HOST, "")).strip()
-            new_options = dict(options)
-            if host:
-                new_options[CONF_LOCAL_HOST] = {"default": host}
-            else:
-                new_options.pop(CONF_LOCAL_HOST, None)
-            return self.async_create_entry(data=new_options)
-        devices = {}
-        runtime = getattr(config_entry, "runtime_data", None)
+    def __init__(self) -> None:
+        self._camera_id: str | None = None
+        self._choices: dict[str, tuple[str, str]] = {}
+
+    def _available_cameras(self) -> dict[str, tuple[str, str]]:
+        runtime = getattr(self.config_entry, "runtime_data", None)
         coordinator = getattr(runtime, "coordinator", None)
         data = getattr(coordinator, "data", None)
-        if isinstance(data, dict):
-            devices = data
-        fields = {
-            vol.Optional(
-                CONF_LOCAL_HOST,
-                default=local_host,
-            ): selector.TextSelector(
-                selector.TextSelectorConfig(
-                    type=selector.TextSelectorType.TEXT,
-                    autocomplete="ip",
-                )
-            ),
-        }
-        hints = (
-            "Thiết bị: "
-            + ", ".join(f"{d.name} ({d.device_id})" for d in list(devices.values())[:8])
-            if devices
-            else "Nhập IP camera trong cùng LAN để Hass dùng RTSP trực tiếp."
-        )
+        choices: dict[str, tuple[str, str]] = {}
+        if isinstance(data, Mapping):
+            for device in data.values():
+                for index, channel in enumerate(device.channels, 1):
+                    try:
+                        number = int(channel.channel_id)
+                    except ValueError:
+                        number = index
+                    else:
+                        if any(item.channel_id == "0" for item in device.channels):
+                            number += 1
+                    path = f"/cam/realmonitor?channel={max(1, number)}&subtype=0"
+                    key = local_camera_key(device.device_id, channel.channel_id)
+                    choices[key] = (f"{device.name} — {channel.name} [{index}]", path)
+        for key, camera in configured_local_cameras(self.config_entry.options).items():
+            choices.setdefault(key, (camera[CONF_LOCAL_HOST], camera[CONF_RTSP_PATH]))
+        return choices
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        self._choices = self._available_cameras()
+        if not self._choices:
+            return self.async_abort(reason="no_devices")
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            key = user_input.get(CONF_CAMERA_ID)
+            if key in self._choices:
+                self._camera_id = key
+                return await self.async_step_local_camera()
+            errors[CONF_CAMERA_ID] = "invalid_camera"
         return self.async_show_form(
             step_id="init",
-            data_schema=vol.Schema(fields),
-            description_placeholders={"devices": hints},
+            data_schema=vol.Schema({
+                vol.Required(CONF_CAMERA_ID): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=[{"value": key, "label": choice[0]} for key, choice in self._choices.items()],
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                    )
+                ),
+            }),
+            errors=errors,
+        )
+
+    async def async_step_local_camera(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        key = self._camera_id
+        if key is None or key not in self._choices:
+            return await self.async_step_init()
+        cameras = configured_local_cameras(self.config_entry.options)
+        previous = cameras.get(key, {})
+        errors: dict[str, str] = {}
+        legacy_host = self.config_entry.options.get(CONF_LOCAL_HOST, "")
+        if isinstance(legacy_host, Mapping):
+            legacy_host = legacy_host.get("default", "")
+        defaults = {
+            CONF_LOCAL_HOST: previous.get(CONF_LOCAL_HOST, legacy_host if isinstance(legacy_host, str) else ""),
+            CONF_RTSP_PORT: previous.get(CONF_RTSP_PORT, 554),
+            CONF_LOCAL_USERNAME: previous.get(CONF_LOCAL_USERNAME, ""),
+            CONF_RTSP_PATH: previous.get(CONF_RTSP_PATH, self._choices[key][1]),
+        }
+        if user_input is not None:
+            defaults.update({field: user_input[field] for field in defaults if field in user_input})
+            if user_input.get(CONF_REMOVE_CAMERA):
+                cameras.pop(key, None)
+            else:
+                values = dict(user_input)
+                for field, default_value in (
+                    (CONF_LOCAL_HOST, defaults.get(CONF_LOCAL_HOST)),
+                    (CONF_RTSP_PORT, defaults.get(CONF_RTSP_PORT)),
+                    (CONF_LOCAL_USERNAME, defaults.get(CONF_LOCAL_USERNAME)),
+                    (CONF_RTSP_PATH, defaults.get(CONF_RTSP_PATH)),
+                ):
+                    values.setdefault(field, default_value)
+                if not values.get(CONF_LOCAL_PASSWORD) and previous:
+                    values[CONF_LOCAL_PASSWORD] = previous.get(CONF_LOCAL_PASSWORD, "")
+                try:
+                    cameras[key] = normalize_local_camera(values)
+                except ValueError as err:
+                    fields = {
+                        "invalid_host": CONF_LOCAL_HOST,
+                        "invalid_port": CONF_RTSP_PORT,
+                        "invalid_path": CONF_RTSP_PATH,
+                        "invalid_credentials": CONF_LOCAL_USERNAME,
+                    }
+                    error_key = str(err)
+                    errors[fields.get(error_key, "base")] = error_key
+            if not errors:
+                options = dict(self.config_entry.options)
+                options.pop(CONF_LOCAL_HOST, None)
+                options[CONF_LOCAL_CAMERAS] = cameras
+                return self.async_create_entry(title="", data=options)
+        return self.async_show_form(
+            step_id="local_camera",
+            data_schema=vol.Schema({
+                vol.Required(CONF_LOCAL_HOST, default=defaults[CONF_LOCAL_HOST]): str,
+                vol.Required(
+                    CONF_RTSP_PORT,
+                    default=str(defaults[CONF_RTSP_PORT]),
+                ): vol.All(
+                    vol.Coerce(str),
+                    vol.Match(r"^[0-9]{1,5}$"),
+                    vol.Coerce(int),
+                    vol.Range(min=1, max=65535),
+                ),
+                vol.Optional(
+                    CONF_LOCAL_USERNAME,
+                    default=defaults[CONF_LOCAL_USERNAME],
+                ): str,
+                vol.Optional(CONF_LOCAL_PASSWORD, default=""): _password_selector(),
+                vol.Required(CONF_RTSP_PATH, default=defaults[CONF_RTSP_PATH]): str,
+                vol.Optional(CONF_REMOVE_CAMERA, default=False): bool,
+            }),
+            errors=errors,
+            description_placeholders={"camera": self._choices[key][0]},
         )
 
 

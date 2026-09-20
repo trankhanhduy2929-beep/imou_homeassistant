@@ -1,4 +1,4 @@
-# Imou Life for Home Assistant
+# Imou Connect for Home Assistant
 
 Custom integration cho Home Assistant: đăng nhập trực tiếp bằng tài khoản Imou Life và đưa
 camera, cảm biến, công tắc và các thuộc tính thing-model vào Home Assistant.
@@ -20,18 +20,18 @@ polling chỉ là dự phòng.
 
 1. Mở HACS → **Integrations** → menu ba chấm → **Custom repositories**.
 2. Dán `https://github.com/trankhanhduy2929-beep/imou_homeassistant`, chọn loại **Integration** → **Add**.
-3. Tìm **Imou Life** → **Download**.
+3. Tìm **Imou Connect** → **Download**.
 4. Restart Home Assistant.
 
 ### Cài chép tay
 
 1. Tải mã nguồn (nút **Code → Download ZIP** hoặc `git clone`).
-2. Chép thư mục `custom_components/imou_life` vào `/config/custom_components/imou_life` trong Home Assistant.
+2. Chép thư mục `custom_components/imou_connect` vào `/config/custom_components/imou_connect` trong Home Assistant.
 3. Restart Home Assistant.
 
 ### Thêm tài khoản
 
-1. Vào **Settings → Devices & services → Add integration → Imou Life**.
+1. Vào **Settings → Devices & services → Add integration → Imou Connect**.
 2. Nhập **tài khoản** và **mật khẩu** Imou Life.
 3. Nếu Imou yêu cầu xác minh:
    - **CAPTCHA**: Home Assistant hiển thị liên kết xác minh. Mở liên kết, hoàn tất CAPTCHA (GeeTest hoặc ảnh 4 ký tự), rồi quay lại.
@@ -42,7 +42,7 @@ Khi token hết hạn hoặc Imou yêu cầu xác minh lại, Home Assistant s�
 
 ## Entity được tạo
 
-- **Camera** cho mỗi channel (P2P RTSP nội bộ, fallback URL cloud).
+- **Camera** cho mỗi channel được cấu hình RTSP local (không dùng P2P; tạo qua **Configure**).
 - **Binary sensor online** cho device và từng channel.
 - **Binary sensor chuyển động** và **phát hiện người** theo channel (nhận qua MQTT push gần như tức thời, polling là dự phòng).
 - **Thing-model property** thành `sensor`, `binary_sensor`, `switch`, `number`, `select` hoặc `text`.
@@ -50,7 +50,6 @@ Khi token hết hạn hoặc Imou yêu cầu xác minh lại, Home Assistant s�
 
 Các thuộc tính chẩn đoán an toàn (không chứa URL ký/token):
 
-- Camera: `stream_status`, `p2p_status`.
 - Cảm biến chuyển động/người: `mqtt_connected`, `alarm_poll`.
 
 ## Realtime
@@ -62,21 +61,25 @@ làm dự phòng khi MQTT tạm mất.
 
 ## RTSP trên LAN (tuỳ chọn)
 
-Camera entity chỉ được tạo khi anh vào **Settings → Imou Life → Configure** và nhập IP camera
-trong cùng LAN — login mặc định chỉ tạo sensors/settings/entities, không probe P2P.
+Login mặc định chỉ tạo sensors/settings/entities, không probe P2P. Khi muốn xem camera:
+vào **Settings → Imou Connect → Configure**, chọn từng camera và nhập IP, cổng và tài khoản
+RTSP local. Camera entity sẽ được tạo sau khi lưu cấu hình.
 
 ## Tính năng theo thiết bị
 
 - Một số property do model thiết bị khai báo nhưng cloud không trả giá trị sẽ hiển thị `unknown`/`unavailable`; đây là giới hạn phía Imou, không phải lỗi cài đặt.
 - Motion/person cần bật phát hiện chuyển động và thông báo sự kiện trong app Imou Life.
 - Trạng thái chuyển động tự trở về `off` sau 30 giây nếu cloud không gửi sự kiện clear.
-- Automation có thể nghe event Home Assistant `imou_life_event`; URL ảnh và giá trị nhạy cảm bị loại khỏi payload.
+- Automation có thể nghe event Home Assistant `imou_connect_event`; URL ảnh và giá trị nhạy cảm bị loại khỏi payload.
 
 ## Nâng cấp
 
-- **HACS**: mở HACS → tìm Imou Life → **Update**.
-- **Chép tay**: chép đè thư mục `custom_components/imou_life`, giữ nguyên config entry, rồi restart Home Assistant.
+- **HACS**: mở HACS → tìm Imou Connect → **Update**.
+- **Chép tay**: chép đè thư mục `custom_components/imou_connect`, giữ nguyên config entry, rồi restart Home Assistant.
 - Không cần xóa integration hoặc đăng nhập lại để nâng cấp, trừ khi tài liệu bản phát hành yêu cầu.
+
+> **Chuyển từ bản `imou_life` cũ:** domain đổi sang `imou_connect` nên không giữ nguyên entry cũ.
+> Gỡ entry Imou Life cũ (sensors/entity cũ), restart, cài Imou Connect và đăng nhập lại.
 
 ## Xử lý sự cố
 
@@ -111,7 +114,7 @@ Khi báo lỗi, gửi log Home Assistant và thuộc tính chẩn đoán. **Khô
 ## Ghi nhận
 
 Cảm ơn `dh-p2p` (khoanguyen-3fc) cho phần tham khảo P2P. Giấy phép MIT kèm theo trong
-[THIRD_PARTY_NOTICES.md](custom_components/imou_life/THIRD_PARTY_NOTICES.md).
+[THIRD_PARTY_NOTICES.md](custom_components/imou_connect/THIRD_PARTY_NOTICES.md).
 
 ## Giấy phép
 

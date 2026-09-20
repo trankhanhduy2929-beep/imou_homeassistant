@@ -29,7 +29,7 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import ImouDataUpdateCoordinator
-from .p2p import ImouP2PRelayManager
+from .media import configured_local_cameras
 from .realtime import ImouCloudMqttClient
 
 if TYPE_CHECKING:
@@ -55,7 +55,7 @@ class ImouRuntime:
     coordinator: ImouDataUpdateCoordinator
     realtime: ImouCloudMqttClient
     realtime_stop: asyncio.Event
-    p2p: ImouP2PRelayManager
+    platforms: tuple[Platform, ...]
     realtime_task: asyncio.Task[None] | None = None
 
 
@@ -101,38 +101,50 @@ async def async_setup_entry(hass: HomeAssistant, entry: ImouConfigEntry) -> bool
         coordinator.async_handle_realtime_event,
         coordinator.async_set_realtime_connected,
     )
-    p2p = ImouP2PRelayManager()
+    platforms = PLATFORMS
+    if configured_local_cameras(entry.options):
+        platforms += CAMERA_PLATFORMS
     api.set_mqtt_request(realtime.async_request)
     entry.runtime_data = ImouRuntime(
         api=api,
         coordinator=coordinator,
         realtime=realtime,
         realtime_stop=realtime_stop,
-        p2p=p2p,
+        platforms=platforms,
     )
-    await coordinator.async_config_entry_first_refresh()
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    try:
+        await coordinator.async_config_entry_first_refresh()
+        await hass.config_entries.async_forward_entry_setups(entry, platforms)
+    except BaseException:
+        api.set_mqtt_request(None)
+        realtime_stop.set()
+        await coordinator.async_shutdown_realtime()
+        await coordinator.async_shutdown()
+        raise
     entry.runtime_data.realtime_task = asyncio.create_task(
         realtime.run(realtime_stop),
         name=f"{DOMAIN} realtime MQTT",
     )
+    entry.async_on_unload(entry.add_update_listener(_async_options_updated))
     return True
+
+
+async def _async_options_updated(hass: HomeAssistant, entry: ImouConfigEntry) -> None:
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ImouConfigEntry) -> bool:
     """Unload an Imou Life config entry."""
-    unloaded = await hass.config_entries.async_unload_platforms(
-        entry, PLATFORMS + CAMERA_PLATFORMS
-    )
+    runtime = entry.runtime_data
+    unloaded = await hass.config_entries.async_unload_platforms(entry, runtime.platforms)
     if not unloaded:
         return False
-    runtime = entry.runtime_data
     runtime.api.set_mqtt_request(None)
     runtime.realtime_stop.set()
     if runtime.realtime_task is not None:
         runtime.realtime_task.cancel()
         with suppress(asyncio.CancelledError):
             await runtime.realtime_task
-    await runtime.p2p.async_close()
     await runtime.coordinator.async_shutdown_realtime()
+    await runtime.coordinator.async_shutdown()
     return True

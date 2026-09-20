@@ -1,0 +1,88 @@
+{
+  "title": "Imou Connect",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Kết nối Imou Connect",
+        "description": "Đăng nhập bằng đúng tài khoản đang dùng trên ứng dụng Imou Life Android. Nếu Imou yêu cầu, CAPTCHA và xác minh thiết bị sẽ xuất hiện ở các bước tiếp theo.",
+        "data": {
+          "account": "Tài khoản, email hoặc số điện thoại",
+          "password": "Mật khẩu"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Kết nối lại Imou Connect",
+        "description": "Nhập mật khẩu hiện tại cho {account}. Home Assistant giữ nguyên định danh thiết bị đã đăng ký.",
+        "data": {
+          "password": "Mật khẩu"
+        }
+      },
+      "captcha": {
+        "title": "Xác minh CAPTCHA Imou Connect",
+        "description": "Mở trang CAPTCHA được bảo vệ, hoàn tất xác minh hình ảnh rồi quay lại Home Assistant. Tài khoản, mật khẩu và token xác minh Imou chỉ nằm phía máy chủ."
+      },
+      "captcha_finish": {
+        "title": "Đang hoàn tất xác minh",
+        "description": "Home Assistant đang tiếp tục đăng nhập Imou Life."
+      },
+      "two_step": {
+        "title": "Xác minh Home Assistant",
+        "description": "Nhập mã sáu số được gửi qua {delivery}. Chọn gửi lại mà không nhập mã để yêu cầu mã mới.",
+        "data": {
+          "valid_code": "Mã xác minh sáu số",
+          "resend_code": "Gửi lại mã"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Không kết nối được Imou cloud.",
+      "invalid_auth": "Imou từ chối tài khoản hoặc mật khẩu.",
+      "invalid_code": "Mã xác minh sai hoặc đã hết hạn.",
+      "verification_pending": "Imou chưa ghi nhận quyền cho terminal sau khi đã nhận mã. Hãy yêu cầu mã mới và xác minh lại; nếu vẫn lặp, gửi các dòng log response_keys/response_flags và không gửi mã OTP.",
+      "code_send_failed": "Imou không gửi được mã xác minh.",
+      "code_sent": "Đã gửi một mã xác minh mới.",
+      "captcha_unavailable": "Imou không trả về CAPTCHA có thể sử dụng.",
+      "unknown": "Imou trả về lỗi không xác định."
+    },
+    "abort": {
+      "already_configured": "Tài khoản Imou Life này đã được cấu hình.",
+      "already_in_progress": "Tài khoản Imou Life này đang được cấu hình.",
+      "captcha_unavailable": "Home Assistant không tạo được trang CAPTCHA được bảo vệ.",
+      "reauth_successful": "Đã kết nối lại Imou Connect thành công.",
+      "unique_id_mismatch": "Tài khoản không khớp entry Imou Connect hiện có."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Chọn camera nội bộ",
+        "description": "Thiết bị và cảm biến được cấu hình qua Imou cloud. Video là tùy chọn và chỉ dùng RTSP nội bộ, không dùng P2P. Chọn camera để cấu hình kết nối nội bộ.",
+        "data": {
+          "camera_id": "Camera"
+        }
+      },
+      "local_camera": {
+        "title": "RTSP nội bộ",
+        "description": "Cấu hình RTSP nội bộ cho {camera}. Nhập thủ công địa chỉ IP hoặc tên máy chủ của camera mà Home Assistant có thể truy cập. Dùng thông tin đăng nhập nội bộ của camera, không phải tài khoản Imou Life. Để trống mật khẩu để giữ mật khẩu đã cấu hình trước đó. Chọn tùy chọn xóa để chỉ xóa cấu hình RTSP nội bộ của camera này; thiết bị và cảm biến qua cloud vẫn được giữ nguyên.",
+        "data": {
+          "local_host": "Địa chỉ IP hoặc tên máy chủ của camera",
+          "rtsp_port": "Cổng RTSP",
+          "local_username": "Tên đăng nhập nội bộ của camera",
+          "local_password": "Mật khẩu nội bộ của camera",
+          "rtsp_path": "Đường dẫn RTSP",
+          "remove_camera": "Xóa cấu hình camera nội bộ"
+        }
+      }
+    },
+    "error": {
+      "invalid_camera": "Chọn một camera trong danh sách.",
+      "invalid_host": "Nhập địa chỉ IP hoặc tên máy chủ hợp lệ của camera, không kèm giao thức URL, cổng hoặc đường dẫn.",
+      "invalid_port": "Nhập số cổng RTSP từ 1 đến 65535.",
+      "invalid_path": "Nhập đường dẫn RTSP bắt đầu bằng một dấu /, không chứa khoảng trắng, dấu gạch chéo ngược hoặc phần fragment (#).",
+      "invalid_credentials": "Nhập thông tin đăng nhập nội bộ của camera: tên đăng nhập tối đa 256 ký tự và mật khẩu tối đa 1024 ký tự. Phải có tên đăng nhập khi đặt mật khẩu."
+    },
+    "abort": {
+      "no_devices": "Chưa có camera để chọn. Kiểm tra thiết bị thuộc tài khoản hoặc được chia sẻ có xuất hiện trong ứng dụng Imou Life Android, sau đó tải lại tích hợp Imou Connect và chờ tải xong thiết bị. Không cần xóa tích hợp hoặc thông tin đăng nhập đã lưu."
+    }
+  }
+}

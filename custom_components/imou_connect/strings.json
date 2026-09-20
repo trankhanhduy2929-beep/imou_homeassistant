@@ -1,0 +1,88 @@
+{
+  "title": "Imou Connect",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up Imou Connect",
+        "description": "Sign in with the same account used by the Imou Life Android app. CAPTCHA and terminal verification are completed in the next steps when required.",
+        "data": {
+          "account": "Account, email, or phone number",
+          "password": "Password"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reconnect Imou Connect",
+        "description": "Enter the current password for {account}. The same Home Assistant terminal identity will be retained.",
+        "data": {
+          "password": "Password"
+        }
+      },
+      "captcha": {
+        "title": "Verify Imou Connect CAPTCHA",
+        "description": "Open the protected CAPTCHA page, finish the image verification, then return to Home Assistant. Account credentials and Imou verification tokens remain server-side."
+      },
+      "captcha_finish": {
+        "title": "Finishing verification",
+        "description": "Home Assistant is continuing the Imou Life login."
+      },
+      "two_step": {
+        "title": "Verify this Home Assistant terminal",
+        "description": "Enter the six-digit code sent through {delivery}. Select resend without entering a code to request a new one.",
+        "data": {
+          "valid_code": "Six-digit verification code",
+          "resend_code": "Resend code"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect to Imou cloud.",
+      "invalid_auth": "Imou rejected the account or password.",
+      "invalid_code": "The verification code is invalid or expired.",
+      "verification_pending": "Imou has not recorded this terminal permission after accepting the code. Request a new code and verify again; if it repeats, share only the response_keys/response_flags log lines, never the OTP.",
+      "code_send_failed": "Imou could not send a verification code.",
+      "code_sent": "A new verification code was sent.",
+      "captcha_unavailable": "Imou did not provide a usable CAPTCHA challenge.",
+      "unknown": "Imou returned an unexpected error."
+    },
+    "abort": {
+      "already_configured": "This Imou Life account is already configured.",
+      "already_in_progress": "Configuration for this Imou Life account is already in progress.",
+      "captcha_unavailable": "Home Assistant could not create the protected CAPTCHA page.",
+      "reauth_successful": "Imou Connect was reconnected successfully.",
+      "unique_id_mismatch": "The account does not match the existing Imou Connect entry."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Choose local camera",
+        "description": "Devices and sensors are configured through Imou cloud. Video is optional and uses local RTSP only, without P2P. Select a camera to configure its local connection.",
+        "data": {
+          "camera_id": "Camera"
+        }
+      },
+      "local_camera": {
+        "title": "RTSP local",
+        "description": "Configure local RTSP for {camera}. Manually enter the camera's IP address or hostname reachable from Home Assistant. Use the camera's local credentials, not your Imou Life account credentials. Leave the password blank to keep the previously configured password. Select the removal option to remove only this camera's local RTSP settings; cloud devices and sensors remain configured.",
+        "data": {
+          "local_host": "Camera IP address or hostname",
+          "rtsp_port": "RTSP port",
+          "local_username": "Local camera username",
+          "local_password": "Local camera password",
+          "rtsp_path": "RTSP path",
+          "remove_camera": "Remove local camera configuration"
+        }
+      }
+    },
+    "error": {
+      "invalid_camera": "Select a camera from the list.",
+      "invalid_host": "Enter a valid camera IP address or hostname without a URL scheme, port, or path.",
+      "invalid_port": "Enter an RTSP port number from 1 to 65535.",
+      "invalid_path": "Enter an RTSP path starting with a single /, without spaces, backslashes, or fragments (#).",
+      "invalid_credentials": "Enter local camera credentials: up to 256 characters for the username and 1024 for the password. A username is required when a password is set."
+    },
+    "abort": {
+      "no_devices": "No cameras are available yet. Check that your owned or shared devices appear in the Imou Life Android app, then reload the Imou Connect integration and wait for devices to finish loading. You do not need to delete the integration or saved credentials."
+    }
+  }
+}

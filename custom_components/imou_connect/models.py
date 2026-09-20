@@ -461,46 +461,68 @@ def _first(raw: Mapping[str, Any], *keys: str, default: Any = None) -> Any:
     return default
 
 
+def _api_identifier(raw: Mapping[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = raw.get(key)
+        if isinstance(value, (str, int)) and not isinstance(value, bool):
+            text = str(value).strip()
+            if text:
+                return text
+    return ""
+
+
 def device_from_api(raw: Mapping[str, Any]) -> ImouDevice | None:
     """Normalize devices from BasicInfoQueryV2, BasicList, or the legacy list."""
-    device_id = str(_first(raw, "deviceId", "deviceid", default="")).strip()
-    product_id = str(_first(raw, "productId", default="")).strip()
-    if not device_id or not product_id:
+    device_id = _api_identifier(raw, "deviceId", "deviceid")
+    product_id = _api_identifier(raw, "productId", "productid")
+    if not device_id:
         return None
     name = str(_first(raw, "name", "deviceName", "devicename", default=device_id))
-    channels: list[ImouChannel] = []
-    raw_channels = raw.get("channelList") or raw.get("channels") or ()
-    if isinstance(raw_channels, list):
+    channel_data: dict[str, dict[str, Any]] = {}
+    for key in ("channelList", "channels"):
+        raw_channels = raw.get(key)
+        if not isinstance(raw_channels, list):
+            continue
         for index, channel in enumerate(raw_channels):
             if not isinstance(channel, Mapping):
                 continue
-            channel_id = str(_first(channel, "channelId", "channelid", default=index))
-            channels.append(
-                ImouChannel(
-                    channel_id=channel_id,
-                    name=str(
-                        _first(
-                            channel,
-                            "channelName",
-                            "name",
-                            default=f"Channel {channel_id}",
-                        )
-                    ),
-                    status=str(channel.get("status"))
-                    if channel.get("status") is not None
-                    else None,
-                    picture_url=_first(channel, "picUrl", "pictureUrl", "thumbnailUrl"),
-                    product_id=str(channel.get("productId"))
-                    if channel.get("productId")
-                    else product_id,
-                    raw=dict(channel),
+            channel_id = _api_identifier(channel, "channelId", "channelid") or str(index)
+            merged = channel_data.setdefault(channel_id, {})
+            for field_name, value in channel.items():
+                if (
+                    merged.get(field_name) in (None, "", [], {})
+                    or field_name in ("productId", "productid")
+                    and not _api_identifier(merged, field_name)
+                ):
+                    merged[field_name] = value
+    channels = [
+        ImouChannel(
+            channel_id=channel_id,
+            name=str(
+                _first(
+                    channel,
+                    "channelName",
+                    "channelname",
+                    "name",
+                    default=f"Channel {channel_id}",
                 )
-            )
+            ),
+            status=str(channel.get("status"))
+            if channel.get("status") is not None
+            else None,
+            picture_url=_first(channel, "picUrl", "picurl", "pictureUrl", "thumbnailUrl"),
+            product_id=_api_identifier(channel, "productId", "productid") or product_id,
+            raw=dict(channel),
+        )
+        for channel_id, channel in channel_data.items()
+    ]
     if not channels:
-        channel_count = raw.get("channelNum") or raw.get("productChannelNum") or 1
+        channel_count = _first(
+            raw, "channelNum", "channelnum", "productChannelNum", default=1
+        )
         try:
             channel_count = max(1, min(int(channel_count), 64))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             channel_count = 1
         channels = [
             ImouChannel(
@@ -516,7 +538,14 @@ def device_from_api(raw: Mapping[str, Any]) -> ImouDevice | None:
         name=name,
         status=str(raw.get("status")) if raw.get("status") is not None else None,
         model=str(
-            _first(raw, "deviceModelName", "deviceModel", "productModel", default="")
+            _first(
+                raw,
+                "deviceModelName",
+                "deviceModel",
+                "devicemodel",
+                "productModel",
+                default="",
+            )
         )
         or None,
         catalog=str(_first(raw, "catalog", "category", default="")) or None,
