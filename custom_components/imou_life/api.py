@@ -59,6 +59,9 @@ GEETEST_PACKAGE_NAME = "com.mm.android.smartlifeiot"
 GEETEST_APP_VERSION = "10.1.6"
 GEETEST_BUILD = "500542"
 GEETEST_ACCOUNT_KEY = "F9TtRyv7X89nM0vp2EKOjdKLFnjlrN9rENCRYPTKEY"
+PUSH_APP_KEY = "456409247234"
+PUSH_SYSTEM_TYPE = "1"
+PUSH_TIME_FORMAT = "yyyy-MM-dd HH:mm:ss"
 MAX_API_RESPONSE_BYTES = 16 * 1024 * 1024
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
 NONCE_ALPHABET = string.ascii_letters + string.digits
@@ -915,6 +918,33 @@ class ImouApiClient:
     def set_mqtt_request(self, callback: MqttRequestCallback | None) -> None:
         """Attach the live APK-compatible MQTT request transport."""
         self._mqtt_request = callback
+
+    async def async_set_client_push_config(
+        self,
+        mqtt_client_id: str,
+        *,
+        client_push_id: str = "",
+        enabled: bool = True,
+    ) -> None:
+        """Register this client so Imou pushes alarms over the MQTT channel."""
+        if not mqtt_client_id:
+            raise ValueError("MQTT push id is required")
+        await self._request_with_retries(
+            "user.push.SetClientPushConfig",
+            SIGNATURE_REVISION,
+            {
+                "appKey": PUSH_APP_KEY,
+                "clientPushId": client_push_id,
+                "language": self._language,
+                "mode": 0,
+                "mqttPushId": mqtt_client_id,
+                "sound": "",
+                "systemPushType": PUSH_SYSTEM_TYPE,
+                "timeFormat": PUSH_TIME_FORMAT,
+                "timezoneOffset": _local_timezone_offset(),
+                "pushStatus": "on" if enabled else "off",
+            },
+        )
 
     @classmethod
     def _captcha_challenge_from_data(

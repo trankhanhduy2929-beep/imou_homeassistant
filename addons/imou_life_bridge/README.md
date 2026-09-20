@@ -51,6 +51,10 @@ Khi dùng add-on này không cần cài custom integration `custom_components/im
 State và discovery config được retain; event không retain. Lệnh từ Home Assistant được gửi
 ngược lên Imou cloud qua property/service API.
 
+## Realtime
+
+Sau khi kết nối, add-on đăng ký nhận push qua MQTT giống app Android, nên sự kiện được đẩy tới sớm thay vì chờ poll; polling vẫn giữ làm dự phòng.
+
 ## Camera và stream
 
 Camera MQTT của add-on là **camera snapshot**. Transport `RTSV1`/`RTSV2`/`lchttp` là định dạng

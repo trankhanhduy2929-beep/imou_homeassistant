@@ -1,5 +1,5 @@
 name: Imou Life Bridge
-version: "1.0.30"
+version: "1.0.31"
 slug: imou_life_bridge
 description: Đăng nhập Imou Life, tạo entity qua MQTT Discovery và nhận sự kiện realtime
 url: https://github.com/trankhanhduy2929-beep/imou_homeassistant

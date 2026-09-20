@@ -974,6 +974,7 @@ class ImouCloudMqttClient:
                 _LOGGER.info(
                     "Imou realtime MQTT connected host=%s port=%s", host, port
                 )
+                await self._async_register_push(config)
                 async for message in client.messages:
                     if stop.is_set():
                         return
@@ -996,6 +997,17 @@ class ImouCloudMqttClient:
             self._client = None
             self._fail_pending_requests("Imou MQTT connection closed")
             await self._set_connected(False)
+
+    async def _async_register_push(self, config: ImouMqttConfig) -> None:
+        """Ask Imou to deliver alarm pushes to this MQTT client."""
+        register = getattr(self.api, "async_set_client_push_config", None)
+        if register is None:
+            return
+        try:
+            await register(config.client_id, client_push_id=config.client_id)
+        except (ImouApiError, ValueError) as error:
+            self.last_error = f"push registration failed: {error}"
+            _LOGGER.warning("Imou MQTT push registration failed: %s", error)
 
     def _resolve_mqtt_response(self, payload: bytes) -> None:
         """Complete the matching request future from an MQTT response."""

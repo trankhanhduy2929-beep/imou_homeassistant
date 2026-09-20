@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.31
+
+- Đăng ký nhận alarm/push qua MQTT giống app Android: gọi `user.push.SetClientPushConfig` với `mqttPushId` là client-id MQTT sau khi kết nối.
+- Giữ polling alarm làm dự phòng; lỗi đăng ký push chỉ ghi cảnh báo, không ngắt kết nối.
+
 ## 1.0.30
 
 - Sửa đọc HTTP body bị chia nhiều chunk: đọc đến EOF, giới hạn JSON 16 MiB và snapshot 5 MiB.

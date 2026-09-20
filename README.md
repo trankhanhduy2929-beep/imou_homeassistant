@@ -68,7 +68,7 @@ MQTT topic mặc định:
 
 - **Camera** cho mỗi channel (custom integration: P2P RTSP nội bộ, fallback URL cloud; add-on: snapshot).
 - **Binary sensor online** cho device và từng channel.
-- **Binary sensor chuyển động** và **phát hiện người** theo channel.
+- **Binary sensor chuyển động** và **phát hiện người** theo channel (nhận qua MQTT push gần như tức thời, polling là dự phòng).
 - **Thing-model property** thành `sensor`, `binary_sensor`, `switch`, `number`, `select` hoặc `text`.
 - **Button** cho service thing-model không có input.
 

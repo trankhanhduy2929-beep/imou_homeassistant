@@ -49,6 +49,10 @@ motion/person có `mqtt_connected` và `alarm_poll`.
 
 Tài liệu đầy đủ: [README repo](../../README.md) (cài đặt, xử lý sự cố, add-on MQTT bridge).
 
+## Realtime
+
+Sau khi kết nối MQTT, integration đăng ký nhận sự kiện trực tiếp (`user.push.SetClientPushConfig` với `mqttPushId` là client-id MQTT), giống app Android. Motion/person được đẩy tới gần như ngay thay vì chờ chu kỳ poll 30 giây; polling vẫn giữ làm dự phòng khi MQTT tạm mất.
+
 ## Nâng cấp
 
 - HACS: mở HACS → **Imou Life** → **Update**.
