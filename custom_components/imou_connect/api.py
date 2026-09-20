@@ -1835,7 +1835,13 @@ class ImouApiClient:
             numeric_code not in SUCCESS_CODES
             and numeric_code not in expected_error_codes
         ):
-            _LOGGER.warning(
+            is_property_rejection = numeric_code == 10003 and api_name in {
+                "iot.control.GetIotProperties",
+                "iot.control.GetProperties",
+            }
+            log_level = logging.DEBUG if is_property_rejection else logging.WARNING
+            _LOGGER.log(
+                log_level,
                 "Imou API rejected request api=%s code=%s http_status=%s "
                 "revision=%s content_type=%s host=%s auth_type=%s "
                 "client_profile=%s",

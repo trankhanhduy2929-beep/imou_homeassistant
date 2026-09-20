@@ -10,9 +10,22 @@ Custom integration này đăng nhập trực tiếp Imou Life bằng account/pas
 4. Nhập tài khoản và mật khẩu Imou Life.
 5. Nếu Imou yêu cầu CAPTCHA, mở liên kết xác minh do config flow hiển thị. Với mã `12112`, nhập mã SMS/email sáu số ở bước tiếp theo.
 
-**Nâng cấp lên `0.1.17`:** giải nén `imou_connect-custom-component-0.1.17.zip`, chép đè mã trong `/config/custom_components/imou_connect`, rồi restart Home Assistant; giữ nguyên config entry và cấu hình hiện có.
+**Nâng cấp lên `0.1.18`:** giải nén `imou_connect-custom-component-0.1.18.zip`, chép đè mã trong `/config/custom_components/imou_connect`, rồi restart Home Assistant; giữ nguyên config entry và cấu hình hiện có.
 
-Bản `0.1.17`:
+Bản `0.1.18`:
+
+- **Sửa TLS context chặn event loop**: `ssl.create_default_context`/`scandir`/`load_verify_locations` chuyển sang `asyncio.to_thread`, sửa lỗi blocking call trong log HA.
+- **Giảm log `GetIotProperties code=10003`** xuống DEBUG: thiết bị từ chối properties không còn spam WARNING mỗi chu kỳ poll.
+- **Đổi tên domain:** `imou_life` → `imou_connect` để tránh trùng integration khác; migration cần xóa entry cũ và đăng nhập lại.
+- **Camera tách khỏi setup mặc định:** login chỉ tạo sensors/settings/entities, không probe P2P nên không treo khi thêm integration.
+- **RTSP local tuỳ chọn:** vào **Settings → Imou Connect → Configure** chọn từng camera và nhập IP, cổng và tài khoản RTSP local; camera entity chỉ được tạo khi có cấu hình hợp lệ.
+- **Discovery lấy `familyId` thật** qua `family.manager.UserFamilyGet` trước `DeviceBasicInfoQueryV2`, sửa lỗi account có family riêng không thấy thiết bị.
+- **P2P credential parsing sửa**: đọc đúng `p2pConfig.accountNew`/`p2pToken`/`ak`.
+- **P2P handshake theo tham chiếu**: agent sign → device auth, đúng PTCP counter và cleanup.
+- **MQTT alarm push**: đăng ký `SetClientPushConfig` nhận sự kiện gần như tức thời.
+- **HTTP body fix**: đọc đến EOF, không cắt JSON.
+
+**Nâng cấp lên `0.1.17`:** giải nén `imou_connect-custom-component-0.1.17.zip`, chép đè mã trong `/config/custom_components/imou_connect`, rồi restart Home Assistant; giữ nguyên config entry và cấu hình hiện có.
 
 - **Camera tách khỏi setup mặc định:** login chỉ tạo sensors/settings/entities, không probe P2P nên không treo khi thêm integration.
 - **RTSP local tuỳ chọn:** vào **Settings → Imou Connect → Configure** chọn từng camera và nhập IP, cổng và tài khoản RTSP local; camera entity chỉ được tạo khi có cấu hình hợp lệ.

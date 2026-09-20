@@ -804,7 +804,7 @@ def _redact_url_values(value: Mapping[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _tls_context() -> ssl.SSLContext:
+def _load_tls_context() -> ssl.SSLContext:
     context = ssl.create_default_context()
     certificate_dir = Path(__file__).with_name("certificates")
     if certificate_dir.is_dir():
@@ -814,6 +814,10 @@ def _tls_context() -> ssl.SSLContext:
             except ssl.SSLError as err:
                 _LOGGER.warning("Could not load MQTT CA %s: %s", certificate.name, err)
     return context
+
+
+async def _async_tls_context() -> ssl.SSLContext:
+    return await asyncio.to_thread(_load_tls_context)
 
 
 class ImouCloudMqttClient:
@@ -964,7 +968,7 @@ class ImouCloudMqttClient:
                 max_queued_outgoing_messages=10,
                 max_inflight_messages=10,
                 max_concurrent_outgoing_calls=10,
-                tls_context=_tls_context(),
+                tls_context=await _async_tls_context(),
             ) as client:
                 self._client = client
                 for topic in MQTT_TOPICS:
