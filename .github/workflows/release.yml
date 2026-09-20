@@ -1,4 +1,4 @@
-name: Build release archives
+name: Build release archive
 
 on:
   push:
@@ -16,24 +16,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Read versions
-        id: versions
+      - name: Read version
+        id: version
         run: |
           INTEGRATION_VERSION="$(python3 -c "import json;print(json.load(open('custom_components/imou_life/manifest.json'))['version'])")"
-          ADDON_VERSION="$(python3 -c "import re;print(re.search(r'^version: \"([^\"]+)\"', open('addons/imou_life_bridge/config.yaml').read(), re.M).group(1))")"
           echo "integration=$INTEGRATION_VERSION" >> "$GITHUB_OUTPUT"
-          echo "addon=$ADDON_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Build integration archive
         run: |
           mkdir -p dist
-          zip -r "dist/imou_life-custom-component-${{ steps.versions.outputs.integration }}.zip" \
+          zip -r "dist/imou_life-custom-component-${{ steps.version.outputs.integration }}.zip" \
             custom_components/imou_life -x '*/__pycache__/*' '*.pyc'
-
-      - name: Build add-on archive
-        run: |
-          zip -r "dist/imou_life-bridge-addon-${{ steps.versions.outputs.addon }}.zip" \
-            addons/imou_life_bridge -x '*/__pycache__/*' '*.pyc'
 
       - name: Checksums
         run: |
@@ -44,7 +37,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: imou-life-archives
+          name: imou-life-archive
           path: dist/*
 
       - name: Publish release assets
