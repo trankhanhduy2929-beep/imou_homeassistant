@@ -10,6 +10,12 @@ Custom integration này đăng nhập trực tiếp Imou Life bằng account/pas
 4. Nhập tài khoản và mật khẩu Imou Life.
 5. Nếu Imou yêu cầu CAPTCHA, mở liên kết xác minh do config flow hiển thị. Với mã `12112`, nhập mã SMS/email sáu số ở bước tiếp theo.
 
+**Nâng cấp lên `0.1.21`:** giải nén `imou_connect-custom-component-0.1.21.zip`, chép đè mã trong `/config/custom_components/imou_connect`, rồi restart Home Assistant; giữ nguyên config entry và cấu hình hiện có.
+
+Bản `0.1.21`:
+
+- **Sửa đăng nhập với mã `12116`**: APK coi `12116` là thiết bị chưa tin cậy, cần xác minh terminal (OTP) giống `12112`; trước đây bị báo lỗi `unknown` nên không đăng nhập được. Nay chuyển sang form OTP/GrantingCredit.
+
 **Nâng cấp lên `0.1.20`:** giải nén `imou_connect-custom-component-0.1.20.zip`, chép đè mã trong `/config/custom_components/imou_connect`, rồi restart Home Assistant; giữ nguyên config entry và cấu hình hiện có.
 
 Bản `0.1.20`:

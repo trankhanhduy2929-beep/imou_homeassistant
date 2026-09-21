@@ -41,7 +41,7 @@ _LOGGER = logging.getLogger(__name__)
 SUCCESS_CODES = frozenset({1000, 10000})
 AUTH_ERROR_CODES = frozenset({401, 403, 1003, 2001, 2002, 2005, 2007, 2101})
 QR_LOGIN_REQUIRED_CODE = 12114
-TWO_STEP_REQUIRED_CODE = 12112
+TWO_STEP_REQUIRED_CODES = frozenset({12112, 12116})
 IMAGE_CAPTCHA_CODES = frozenset({2026, 2032, 9000, 10007, 12110})
 GEETEST_CAPTCHA_CODES = frozenset({2033, QR_LOGIN_REQUIRED_CODE})
 CAPTCHA_CHALLENGE_CODES = IMAGE_CAPTCHA_CODES | GEETEST_CAPTCHA_CODES
@@ -1867,7 +1867,7 @@ class ImouApiClient:
                     client_ua=effective_client_ua,
                 ),
             )
-        if numeric_code == TWO_STEP_REQUIRED_CODE:
+        if numeric_code in TWO_STEP_REQUIRED_CODES:
             response_keys = (
                 self._safe_mapping_keys(result)
                 if isinstance(result, Mapping)

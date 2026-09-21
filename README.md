@@ -92,6 +92,7 @@ Camera entity được tạo sau khi lưu cấu hình và cấu hình đã lưu 
 | --- | --- |
 | Không thêm được integration | Xem log Home Assistant; bảo đảm đã restart sau khi chép file và HA tải được `aiomqtt==2.5.1` |
 | Báo sai tài khoản/mật khẩu | Thử đúng tài khoản trên app Imou Life; tài khoản có thể bị tạm khóa nếu sai nhiều lần |
+| Đăng nhập xong báo lỗi không rõ (mã `12112`/`12116`) | Imou coi thiết bị chưa tin cậy và yêu cầu OTP; nhập mã SMS/email 6 số ở bước xác minh. Nếu không thấy form, cập nhật lên `0.1.21` rồi thử lại |
 | Không mở được liên kết CAPTCHA | Home Assistant phải có URL mà trình duyệt truy cập được (gợi ý: đặt đúng external URL trong Settings → System → Network) |
 | Sensor luôn `unknown` | Property đó cloud không trả giá trị, hoặc thiết bị offline; kiểm tra binary sensor online và thuộc tính chẩn đoán |
 | Sensor không tự cập nhật | Kiểm tra kết nối MQTT (`mqtt_connected`) và thử reload integration; polling 30 giây là dự phòng |
