@@ -1986,6 +1986,9 @@ class ImouApiClient:
     async def async_list_devices(self) -> list[ImouDevice]:
         """Discover rich home devices and channels with legacy fallbacks."""
         last_error: ImouApiError | None = None
+        merged: dict[str, dict[str, Any]] = {}
+        devices: list[ImouDevice] = []
+        incomplete: set[str] | None = None
         for list_devices in (
             self._list_device_basic_info,
             self._list_basic_devices,
@@ -1999,16 +2002,38 @@ class ImouApiClient:
                 last_error = err
                 continue
             last_error = None
-            merged: dict[str, dict[str, Any]] = {}
             for raw in raw_devices:
                 if not isinstance(raw, Mapping):
                     continue
                 device_id = _api_identifier(raw, "deviceId", "deviceid")
-                if not device_id:
+                if not device_id or incomplete is not None and device_id not in incomplete:
                     continue
                 record = merged.setdefault(device_id, {})
+                known_device = device_from_api(record) if incomplete is not None else None
+                channel_products = (
+                    {channel.channel_id: channel.product_id for channel in known_device.channels}
+                    if known_device is not None else {}
+                )
                 for key, value in raw.items():
+                    if incomplete is not None and key not in (
+                        "productId", "productid", "channelList", "channels",
+                        "channelNum", "channelnum", "productChannelNum",
+                    ):
+                        continue
                     if key in ("channelList", "channels") and isinstance(value, list):
+                        if incomplete is not None:
+                            value = [
+                                {
+                                    "channelId": channel_id,
+                                    "productId": channel_products.get(channel_id)
+                                    or _api_identifier(channel, "productId", "productid"),
+                                }
+                                for index, channel in enumerate(value)
+                                if isinstance(channel, Mapping)
+                                for channel_id in (
+                                    _api_identifier(channel, "channelId", "channelid") or str(index),
+                                )
+                            ]
                         previous = record.get(key)
                         record[key] = (
                             previous if isinstance(previous, list) else []
@@ -2031,7 +2056,13 @@ class ImouApiClient:
                 if (device := device_from_api(raw)) is not None
             ]
             if devices:
-                return devices
+                incomplete = {
+                    device.device_id for device in devices if not device.product_id
+                }
+                if not incomplete:
+                    return devices
+        if devices:
+            return devices
         if last_error is not None:
             raise last_error
         return []

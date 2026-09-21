@@ -23,6 +23,7 @@ CONF_LOCAL_PASSWORD: Final = "local_password"
 CONF_RTSP_PORT: Final = "rtsp_port"
 CONF_RTSP_PATH: Final = "rtsp_path"
 CONF_REMOVE_CAMERA: Final = "remove_camera"
+CONF_VALIDATE_STREAM: Final = "validate_stream"
 
 DEFAULT_POLL_INTERVAL: Final = 30
 DEFAULT_REQUEST_TIMEOUT: Final = 15

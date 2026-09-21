@@ -70,6 +70,7 @@
           "local_username": "Local camera username",
           "local_password": "Local camera password",
           "rtsp_path": "RTSP path",
+          "validate_stream": "Check the RTSP stream before saving",
           "remove_camera": "Remove local camera configuration"
         }
       }
@@ -79,7 +80,13 @@
       "invalid_host": "Enter a valid camera IP address or hostname without a URL scheme, port, or path.",
       "invalid_port": "Enter an RTSP port number from 1 to 65535.",
       "invalid_path": "Enter an RTSP path starting with a single /, without spaces, backslashes, or fragments (#).",
-      "invalid_credentials": "Enter local camera credentials: up to 256 characters for the username and 1024 for the password. A username is required when a password is set."
+      "invalid_credentials": "Enter local camera credentials: up to 256 characters for the username and 1024 for the password. A username is required when a password is set.",
+      "stream_unauthorized": "The camera rejected the local username or password. Check the local camera credentials, not the Imou Life account.",
+      "stream_not_found": "The RTSP path was not found on the camera. Verify the RTSP path (for example the channel number).",
+      "stream_unreachable": "Cannot reach the camera at this address and port. Verify the IP address, port, and that Home Assistant is on the same network.",
+      "stream_timeout": "The camera did not start streaming in time. Verify the RTSP path and network, or try the sub stream.",
+      "stream_no_video": "The camera connected but did not send any video. Verify the RTSP path (for example the channel number).",
+      "stream_invalid": "The camera did not return a valid RTSP video stream. Verify the RTSP path and credentials."
     },
     "abort": {
       "no_devices": "No cameras are available yet. Check that your owned or shared devices appear in the Imou Life Android app, then reload the Imou Connect integration and wait for devices to finish loading. You do not need to delete the integration or saved credentials."

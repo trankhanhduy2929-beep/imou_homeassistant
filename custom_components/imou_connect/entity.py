@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
-from typing import Any
+from typing import Any, Self
 
 from homeassistant.core import callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -35,6 +36,12 @@ class ImouEntity(CoordinatorEntity[ImouDataUpdateCoordinator]):
         self._device_snapshot = device
         self._attr_unique_id = f"{device.device_id}_{unique_suffix}"
         self._attr_name = name
+        self._definition_available = True
+
+    def async_refresh_definition(self, updated: Self) -> None:
+        self._device_snapshot = updated._device_snapshot
+        self._attr_name = updated._attr_name
+        self._definition_available = True
 
     @property
     def device(self) -> ImouDevice | None:
@@ -59,6 +66,7 @@ class ImouEntity(CoordinatorEntity[ImouDataUpdateCoordinator]):
         device = self.device
         return (
             self.coordinator.last_update_success
+            and self._definition_available
             and device is not None
             and device.online is not False
         )
@@ -120,6 +128,10 @@ class ImouPropertyEntity(ImouEntity):
         )
         self.property = prop
 
+    def async_refresh_definition(self, updated: Self) -> None:
+        super().async_refresh_definition(updated)
+        self.property = updated.property
+
     @property
     def property_value(self) -> Any:
         """Return the latest normalized property value."""
@@ -137,6 +149,8 @@ class ImouPropertyEntity(ImouEntity):
 
     async def async_set_property(self, value: Any) -> None:
         """Write the property through the coordinator."""
+        if not self._definition_available:
+            raise HomeAssistantError("Imou property is no longer available")
         await self.coordinator.async_set_property(
             self.device_id, self.property, value
         )
@@ -149,7 +163,7 @@ def async_setup_dynamic_entities(
     build_entities: Callable[[ImouDevice], Iterable[Entity]],
 ) -> None:
     """Add newly discovered devices/properties without duplicating entities."""
-    known_unique_ids: set[str] = set()
+    known_entities: dict[str, Entity] = {}
     known_signatures: dict[str, tuple[Any, ...]] = {}
 
     @callback
@@ -158,24 +172,36 @@ def async_setup_dynamic_entities(
         for device in coordinator.data.values():
             signature = (
                 device.product_id,
-                tuple(channel.channel_id for channel in device.channels),
+                device.name,
+                device.model,
+                coordinator.max_properties,
                 tuple(
-                    (prop.ref, prop.access_mode, prop.data_type)
-                    for prop in device.thing_model.properties
+                    (channel.channel_id, channel.name, channel.product_id)
+                    for channel in device.channels
                 ),
-                tuple(service.ref for service in device.thing_model.services),
+                device.thing_model,
             )
             if known_signatures.get(device.device_id) == signature:
                 continue
             known_signatures[device.device_id] = signature
+            for existing in known_entities.values():
+                if (
+                    isinstance(existing, ImouEntity)
+                    and existing.device_id == device.device_id
+                ):
+                    existing._definition_available = False
             for entity in build_entities(device):
                 unique_id = entity.unique_id
-                if unique_id is None or unique_id in known_unique_ids:
+                if unique_id is None:
                     continue
-                known_unique_ids.add(unique_id)
+                if (existing := known_entities.get(unique_id)) is not None:
+                    if isinstance(existing, ImouEntity) and type(existing) is type(entity):
+                        existing.async_refresh_definition(entity)
+                    continue
+                known_entities[unique_id] = entity
                 entities.append(entity)
         if entities:
             async_add_entities(entities)
 
-    _async_add_new_entities()
     entry.async_on_unload(coordinator.async_add_listener(_async_add_new_entities))
+    _async_add_new_entities()

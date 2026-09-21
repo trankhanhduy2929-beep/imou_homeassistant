@@ -63,7 +63,12 @@ làm dự phòng khi MQTT tạm mất.
 
 Login mặc định chỉ tạo sensors/settings/entities, không probe P2P. Khi muốn xem camera:
 vào **Settings → Imou Connect → Configure**, chọn từng camera và nhập IP, cổng và tài khoản
-RTSP local. Camera entity sẽ được tạo sau khi lưu cấu hình.
+RTSP local.
+
+Trước khi lưu, integration **thử mở một khung hình RTSP** và báo rõ nguyên nhân nếu lỗi:
+sai tài khoản/mật khẩu local, sai đường dẫn/kênh, không tới được IP-cổng, quá thời gian,
+không có video hoặc không phải luồng RTSP hợp lệ. Có ô bỏ qua kiểm tra khi camera tạm offline.
+Camera entity được tạo sau khi lưu cấu hình và cấu hình đã lưu không bị tự kiểm tra lại.
 
 ## Tính năng theo thiết bị
 
@@ -90,7 +95,8 @@ RTSP local. Camera entity sẽ được tạo sau khi lưu cấu hình.
 | Không mở được liên kết CAPTCHA | Home Assistant phải có URL mà trình duyệt truy cập được (gợi ý: đặt đúng external URL trong Settings → System → Network) |
 | Sensor luôn `unknown` | Property đó cloud không trả giá trị, hoặc thiết bị offline; kiểm tra binary sensor online và thuộc tính chẩn đoán |
 | Sensor không tự cập nhật | Kiểm tra kết nối MQTT (`mqtt_connected`) và thử reload integration; polling 30 giây là dự phòng |
-| Camera không phát được | Thiết bị chỉ trả transport riêng của SDK hoặc P2P không thiết lập được; xem `stream_status`, `p2p_status` trong thuộc tính camera |
+| Camera không phát được | Mở **Configure**, chọn lại camera để được kiểm tra RTSP và báo nguyên nhân. Nếu luồng chính (main, HEVC nặng) không phát, thử đường dẫn `subtype=1` (luồng phụ) |
+| Chỉ thấy vài entity, thiếu setting/nút | Cập nhật lên `0.1.20` rồi reload integration để discovery/model và entity được làm mới; nếu vẫn thiếu, gửi log đã che thông tin |
 
 Khi báo lỗi, gửi log Home Assistant và thuộc tính chẩn đoán. **Không gửi mật khẩu, OTP hoặc token vào issue/chat.**
 
@@ -109,7 +115,10 @@ Khi báo lỗi, gửi log Home Assistant và thuộc tính chẩn đoán. **Khô
 - Các trường hợp dữ liệu bị chia nhiều chunk, UTF-8 và giới hạn kích thước được kiểm thử tự động.
 - Motion/person kích hoạt vật lý có thể chưa được xác minh đầy đủ trên mọi model; hãy tự kiểm tra với camera của bạn.
 - Kiểm thử được thực hiện với tài khoản người dùng cung cấp; không đưa thông tin tài khoản lên repo.
-- Camera LAN `192.168.5.155` phát được 2304×1296 HEVC 5 frame trong 0.08s qua RTSP TCP và ONVIF kết nối được. Motion/person kích hoạt vật lý có thể chưa được xác minh đầy đủ trên mọi model; hãy tự kiểm tra với camera của bạn.
+- Camera LAN `192.168.5.155` phát được 2304×1296 HEVC 5 frame trong 0.08s qua RTSP TCP và ONVIF kết nối được.
+- Kiểm tra RTSP khi Configure đã thử thật: host không tới trả `stream_timeout`, sai mật khẩu camera trả `stream_unauthorized`.
+- Discovery bổ sung và làm mới entity dùng fixture tổng hợp; **chưa xác minh payload thật của tài khoản từng bị thiếu entity**.
+- Motion/person kích hoạt vật lý có thể chưa được xác minh đầy đủ trên mọi model; hãy tự kiểm tra với camera của bạn.
 
 ## Ghi nhận
 

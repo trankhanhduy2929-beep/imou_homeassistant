@@ -41,6 +41,8 @@ from .realtime import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+_MODEL_TTL = 300
+_MODEL_RETRY_DELAY = 60
 
 
 class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
@@ -67,6 +69,8 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
         self.config_entry = config_entry
         self.max_properties = max_properties
         self._model_cache: dict[str, ThingModel] = {}
+        self._model_cache_expires: dict[str, float] = {}
+        self._model_locks: dict[str, asyncio.Lock] = {}
         self.realtime_connected = False
         self._realtime_states: dict[tuple[str, str, str], bool] = {}
         self._realtime_events: dict[tuple[str, str], dict[str, Any]] = {}
@@ -129,33 +133,14 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
         self, device: ImouDevice, previous: ImouDevice | None
     ) -> ImouDevice:
         """Attach a cached thing model and current primitive property values."""
-        model = (
-            self._model_cache.get(device.product_id) if device.product_id else None
-        )
-        if model is None and previous is not None:
-            model = previous.thing_model
-        if not device.product_id:
-            model = model or device.thing_model
-        elif model is None or not (model.properties or model.services):
-            try:
-                response = await self.api.async_query_model(device.product_id)
-                model = parse_thing_model(
-                    response.get("modelJson")
-                    or response.get("model")
-                    or response.get("thingModel")
-                    or response,
-                    str(response.get("md5")) if response.get("md5") else None,
-                )
-                self._model_cache[device.product_id] = model
-            except ImouAuthError:
-                raise
-            except ImouApiError as err:
-                _LOGGER.warning(
-                    "Thing model unavailable product_id=%s code=%s",
-                    device.product_id,
-                    err.code,
-                )
-                model = previous.thing_model if previous is not None else ThingModel()
+        if previous is not None and (
+            previous.device_id != device.device_id
+            or previous.product_id != device.product_id
+        ):
+            previous = None
+        model = previous.thing_model if previous is not None else device.thing_model
+        if device.product_id:
+            model = await self._async_product_model(device.product_id, model)
 
         properties = model.exposed_properties(self.max_properties)
         readable_properties = tuple(prop for prop in properties if prop.readable)
@@ -179,13 +164,48 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
             except ImouAuthError:
                 raise
             except ImouApiError as err:
-                _LOGGER.warning(
-                    "Property refresh unavailable device_id=%s code=%s",
-                    device.device_id,
-                    err.code,
-                )
+                _LOGGER.debug("Property refresh unavailable code=%s", err.code)
         enriched = device.with_thing_model(model).with_properties(values)
         return enriched
+
+    async def _async_product_model(
+        self, product_id: str, previous: ThingModel
+    ) -> ThingModel:
+        lock = self._model_locks.setdefault(product_id, asyncio.Lock())
+        async with lock:
+            model = self._model_cache.get(product_id, previous)
+            if time.monotonic() < self._model_cache_expires.get(product_id, 0):
+                return model
+            try:
+                response = await self.api.async_query_model(product_id)
+                model = parse_thing_model(
+                    response.get("modelJson")
+                    or response.get("model")
+                    or response.get("thingModel")
+                    or response,
+                    str(response.get("md5")) if response.get("md5") else None,
+                )
+            except ImouAuthError:
+                raise
+            except ImouApiError as err:
+                self._model_cache[product_id] = model
+                self._model_cache_expires[product_id] = (
+                    time.monotonic() + _MODEL_RETRY_DELAY
+                )
+                _LOGGER.debug("Thing model unavailable code=%s", err.code)
+                return model
+            exposed = len(model.exposed_properties(self.max_properties)) + sum(
+                service.zero_input for service in model.services
+            )
+            self._model_cache[product_id] = model
+            self._model_cache_expires[product_id] = time.monotonic() + (
+                _MODEL_TTL if exposed else _MODEL_RETRY_DELAY
+            )
+            _LOGGER.debug(
+                "Thing model properties=%s services=%s exposed=%s",
+                len(model.properties), len(model.services), exposed,
+            )
+            return model
 
     def device(self, device_id: str) -> ImouDevice | None:
         """Return the latest device snapshot."""
@@ -473,6 +493,11 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
         device = self.device(device_id)
         if device is None:
             raise UpdateFailed("Imou device is no longer available")
+        if (
+            not prop.writable
+            or prop not in device.thing_model.exposed_properties(self.max_properties)
+        ):
+            raise UpdateFailed("Imou property is no longer writable")
         try:
             await self.api.async_set_properties(
                 device.product_id,
@@ -490,7 +515,12 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
         await self.async_request_refresh()
         current = self.data if isinstance(self.data, dict) else {}
         refreshed = current.get(device.device_id)
-        if refreshed is not None and refreshed.properties.get(prop.identifier) != value:
+        if (
+            refreshed is not None
+            and refreshed.product_id == device.product_id
+            and prop in refreshed.thing_model.exposed_properties(self.max_properties)
+            and refreshed.properties.get(prop.identifier) != value
+        ):
             optimistic = dict(refreshed.properties)
             optimistic[prop.identifier] = value
             updated = dict(current)
@@ -506,6 +536,8 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
         device = self.device(device_id)
         if device is None:
             raise UpdateFailed("Imou device is no longer available")
+        if not service.zero_input or service not in device.thing_model.services:
+            raise UpdateFailed("Imou service is no longer available without input")
         try:
             await self.api.async_invoke_service(
                 device.product_id,

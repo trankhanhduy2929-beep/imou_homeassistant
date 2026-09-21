@@ -167,6 +167,10 @@ class ImouPropertyBinarySensor(ImouPropertyEntity, BinarySensorEntity):
         super().__init__(coordinator, device, prop)
         self._attr_device_class = _property_device_class(prop.identifier)
 
+    def async_refresh_definition(self, updated: ImouPropertyBinarySensor) -> None:
+        super().async_refresh_definition(updated)
+        self._attr_device_class = updated._attr_device_class
+
     @property
     def is_on(self) -> bool | None:
         """Return the normalized boolean property value."""

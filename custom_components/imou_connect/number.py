@@ -45,6 +45,13 @@ class ImouPropertyNumber(ImouPropertyEntity, NumberEntity):
         self._attr_native_step = prop.step if prop.step is not None else 1
         self._attr_native_unit_of_measurement = prop.unit
 
+    def async_refresh_definition(self, updated: ImouPropertyNumber) -> None:
+        super().async_refresh_definition(updated)
+        self._attr_native_min_value = updated._attr_native_min_value
+        self._attr_native_max_value = updated._attr_native_max_value
+        self._attr_native_step = updated._attr_native_step
+        self._attr_native_unit_of_measurement = updated._attr_native_unit_of_measurement
+
     @property
     def native_value(self) -> float | None:
         """Return the current numeric value."""

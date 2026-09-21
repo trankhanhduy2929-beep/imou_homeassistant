@@ -44,6 +44,7 @@ from .const import (
     CONF_REMOVE_CAMERA,
     CONF_RTSP_PATH,
     CONF_RTSP_PORT,
+    CONF_VALIDATE_STREAM,
     CAPTCHA_RESUME_AUTHENTICATE,
     CAPTCHA_RESUME_GRANT_OTP,
     CAPTCHA_RESUME_SEND_OTP,
@@ -760,7 +761,7 @@ class ImouLifeOptionsFlow(config_entries.OptionsFlow):
                 if not values.get(CONF_LOCAL_PASSWORD) and previous:
                     values[CONF_LOCAL_PASSWORD] = previous.get(CONF_LOCAL_PASSWORD, "")
                 try:
-                    cameras[key] = normalize_local_camera(values)
+                    normalized = normalize_local_camera(values)
                 except ValueError as err:
                     fields = {
                         "invalid_host": CONF_LOCAL_HOST,
@@ -770,6 +771,15 @@ class ImouLifeOptionsFlow(config_entries.OptionsFlow):
                     }
                     error_key = str(err)
                     errors[fields.get(error_key, "base")] = error_key
+                else:
+                    if values.get(CONF_VALIDATE_STREAM, True):
+                        from .stream_probe import async_check_local_stream
+
+                        stream_error = await async_check_local_stream(normalized)
+                        if stream_error:
+                            errors["base"] = stream_error
+                    if not errors:
+                        cameras[key] = normalized
             if not errors:
                 options = dict(self.config_entry.options)
                 options.pop(CONF_LOCAL_HOST, None)
@@ -793,6 +803,7 @@ class ImouLifeOptionsFlow(config_entries.OptionsFlow):
                 ): str,
                 vol.Optional(CONF_LOCAL_PASSWORD, default=""): _password_selector(),
                 vol.Required(CONF_RTSP_PATH, default=defaults[CONF_RTSP_PATH]): str,
+                vol.Optional(CONF_VALIDATE_STREAM, default=True): bool,
                 vol.Optional(CONF_REMOVE_CAMERA, default=False): bool,
             }),
             errors=errors,

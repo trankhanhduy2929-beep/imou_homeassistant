@@ -10,6 +10,18 @@ Custom integration này đăng nhập trực tiếp Imou Life bằng account/pas
 4. Nhập tài khoản và mật khẩu Imou Life.
 5. Nếu Imou yêu cầu CAPTCHA, mở liên kết xác minh do config flow hiển thị. Với mã `12112`, nhập mã SMS/email sáu số ở bước tiếp theo.
 
+**Nâng cấp lên `0.1.20`:** giải nén `imou_connect-custom-component-0.1.20.zip`, chép đè mã trong `/config/custom_components/imou_connect`, rồi restart Home Assistant; giữ nguyên config entry và cấu hình hiện có.
+
+Bản `0.1.20`:
+
+- **Kiểm tra RTSP trước khi lưu camera local:** Configure thử mở một khung hình và báo rõ `stream_unauthorized`, `stream_not_found`, `stream_unreachable`, `stream_timeout`, `stream_no_video` hoặc `stream_invalid`; có ô bỏ qua khi camera tạm offline.
+- **Bổ sung discovery:** danh sách dày đặc nhưng thiếu `productId` không còn chặn `BasicList`/legacy; dùng `productId` của kênh khi thiết bị một kênh.
+- **Thing-model ổn định hơn:** cache có TTL, retry 60 giây khi model rỗng, không tái dùng model cũ khi `productId` đổi, gộp request trùng theo sản phẩm.
+- **Entity cập nhật tại chỗ:** phát hiện đủ metadata để thêm/bỏ/thay control; nút service thiếu input hợp lệ không tạo nữa; control không còn tồn tại chuyển `unavailable`.
+- Đã kiểm thử thật trên mạng lab: host không tới trả `stream_timeout`, sai mật khẩu camera trả `stream_unauthorized`.
+
+**Nâng cấp lên `0.1.19`:** giải nén `imou_connect-custom-component-0.1.19.zip`, chép đè mã trong `/config/custom_components/imou_connect`, rồi restart Home Assistant; giữ nguyên config entry và cấu hình hiện có. Sửa lỗi form Configure không chuyển được thành JSON do `vol.Match`.
+
 **Nâng cấp lên `0.1.18`:** giải nén `imou_connect-custom-component-0.1.18.zip`, chép đè mã trong `/config/custom_components/imou_connect`, rồi restart Home Assistant; giữ nguyên config entry và cấu hình hiện có.
 
 Bản `0.1.18`:

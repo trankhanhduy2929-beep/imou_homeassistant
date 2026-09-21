@@ -227,9 +227,7 @@ class ThingProperty:
     maximum: float | None = None
     step: float | None = None
     enum_options: tuple[str, ...] = ()
-    enum_labels: Mapping[str, str] = field(
-        default_factory=dict, repr=False, compare=False
-    )
+    enum_labels: Mapping[str, str] = field(default_factory=dict, repr=False, hash=False)
     description: str | None = None
 
     @property
@@ -257,6 +255,11 @@ class ThingService:
     ref: str
     name: str
     input_data: tuple[ThingProperty, ...] = ()
+    input_data_valid: bool = True
+
+    @property
+    def zero_input(self) -> bool:
+        return self.input_data_valid and not self.input_data
 
 
 @dataclass(slots=True, frozen=True)
@@ -275,6 +278,7 @@ class ThingModel:
                 not (prop.readable or prop.writable)
                 or prop.sensitive
                 or prop.data_type not in PRIMITIVE_TYPES
+                or prop.writable and prop.data_type == "enum" and not prop.enum_options
             ):
                 continue
             result.append(prop)
@@ -415,12 +419,18 @@ def parse_thing_model(
             if not identifier or not ref or ref in seen_services:
                 continue
             seen_services.add(ref)
-            inputs = tuple(
-                prop
-                for child in item.get("inputData") or ()
-                if isinstance(child, Mapping)
-                and (prop := _parse_property(child, default_access="w")) is not None
+            raw_inputs = item.get("inputData", [])
+            inputs_valid = isinstance(raw_inputs, list)
+            inputs = (
+                tuple(
+                    prop
+                    for child in raw_inputs
+                    if isinstance(child, Mapping)
+                    and (prop := _parse_property(child, default_access="w")) is not None
+                )
+                if inputs_valid else ()
             )
+            inputs_valid = inputs_valid and len(inputs) == len(raw_inputs)
             services.append(
                 ThingService(
                     identifier=identifier,
@@ -429,6 +439,7 @@ def parse_thing_model(
                         identifier, item.get("name"), f"Dịch vụ {ref}"
                     ),
                     input_data=inputs,
+                    input_data_valid=inputs_valid,
                 )
             )
     return ThingModel(tuple(properties), tuple(services), md5=md5)
@@ -532,6 +543,15 @@ def device_from_api(raw: Mapping[str, Any]) -> ImouDevice | None:
             )
             for index in range(channel_count)
         ]
+    if not product_id and len(channels) == 1:
+        for key in ("channelNum", "channelnum", "productChannelNum"):
+            try:
+                if raw.get(key) not in (None, "") and int(_api_identifier(raw, key)) != 1:
+                    break
+            except (TypeError, ValueError, OverflowError):
+                break
+        else:
+            product_id = channels[0].product_id or ""
     return ImouDevice(
         device_id=device_id,
         product_id=product_id,

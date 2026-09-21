@@ -41,6 +41,7 @@ class ImouPropertySensor(ImouPropertyEntity, SensorEntity):
         """Initialize an Imou property sensor."""
         super().__init__(coordinator, device, prop)
         self._attr_native_unit_of_measurement = prop.unit
+        self._attr_device_class = None
         normalized = prop.identifier.casefold().replace("_", "")
         if "battery" in normalized and prop.unit in {None, "%", PERCENTAGE}:
             self._attr_device_class = SensorDeviceClass.BATTERY
@@ -51,6 +52,11 @@ class ImouPropertySensor(ImouPropertyEntity, SensorEntity):
             UnitOfTemperature.CELSIUS,
         }:
             self._attr_device_class = SensorDeviceClass.TEMPERATURE
+
+    def async_refresh_definition(self, updated: ImouPropertySensor) -> None:
+        super().async_refresh_definition(updated)
+        self._attr_native_unit_of_measurement = updated._attr_native_unit_of_measurement
+        self._attr_device_class = updated._attr_device_class
 
     @property
     def native_value(self) -> Any:

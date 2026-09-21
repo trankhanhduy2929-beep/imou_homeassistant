@@ -6,6 +6,7 @@ from collections.abc import Iterable
 
 from homeassistant.components.button import ButtonEntity
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -24,7 +25,7 @@ async def async_setup_entry(
 
     def build(device: ImouDevice) -> Iterable[Entity]:
         for service in device.thing_model.services:
-            if not service.input_data:
+            if service.zero_input:
                 yield ImouServiceButton(coordinator, device, service)
 
     async_setup_dynamic_entities(coordinator, entry, async_add_entities, build)
@@ -43,6 +44,12 @@ class ImouServiceButton(ImouEntity, ButtonEntity):
         )
         self.service = service
 
+    def async_refresh_definition(self, updated: ImouServiceButton) -> None:
+        super().async_refresh_definition(updated)
+        self.service = updated.service
+
     async def async_press(self) -> None:
         """Invoke the service."""
+        if not self._definition_available:
+            raise HomeAssistantError("Imou service is no longer available")
         await self.coordinator.async_invoke_service(self.device_id, self.service)

@@ -48,6 +48,12 @@ class ImouPropertySelect(ImouPropertyEntity, SelectEntity):
             self._label_to_raw[label] = raw_option
         self._attr_options = list(self._label_to_raw)
 
+    def async_refresh_definition(self, updated: ImouPropertySelect) -> None:
+        super().async_refresh_definition(updated)
+        self._raw_to_label = updated._raw_to_label
+        self._label_to_raw = updated._label_to_raw
+        self._attr_options = updated._attr_options
+
     @property
     def current_option(self) -> str | None:
         """Return the raw enum option expected by Imou."""
