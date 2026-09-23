@@ -230,15 +230,16 @@ def _flatten_ability_text(value: Any) -> str:
 def stream_entry_host(raw: Mapping[str, Any]) -> str | None:
     """Return the device stream-entry base URL used for cloud PTZ.
 
-    Imou Life sends `things.ptz.PtzMove` to the device's `streamEntryAddrV4`
+    Imou Life sends `things.ptz.PtzMove` to the device's `streamEntryAddr`
     host; the account entry host rejects it with code `12100` (no authority).
+    MQTT brokers (the `streamEntryAddrV4` value) are not HTTP entries.
     """
     for key in PTZ_STREAM_HOST_FIELDS:
         value = raw.get(key)
         if not isinstance(value, str):
             continue
         host = value.strip().rstrip("/")
-        if not host:
+        if not host or "mqtt" in host.lower() or ":8883" in host:
             continue
         if not host.startswith(("http://", "https://")):
             host = f"https://{host}"

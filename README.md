@@ -63,12 +63,13 @@ Thiết bị hỗ trợ PTZ sẽ có thêm các **nút bấm** đặt ngay cạn
 Mỗi lần bấm gửi một lệnh ngắn 200 ms qua API đám mây `things.ptz.PtzMove`, dùng đúng trục
 chuẩn hóa và dấu như app Imou Life `10.1.6` (`±0.625` cho pan/tilt, `±0.5` cho zoom).
 Giống app, lệnh được gửi tới **host stream-entry của thiết bị** (trường `streamEntryAddr` từ
-`device.list.CommonDeviceDetailsInfoGetByDeviceId`), không phải host tài khoản — host tài khoản
-trả `12100` (không có quyền) cho camera đám mây. Không dùng `streamEntryAddrV4` vì đó là host
-MQTT (`:8883`). Request tới host stream-entry dùng thêm CA riêng của Imou
-(`certificates/*.crt`) nên không bị `CERTIFICATE_VERIFY_FAILED`. Integration lấy host khi bấm
-PTZ lần đầu (cache lại) và chỉ tạo nút khi model thiết bị/trường `ability` khai báo có PTZ. Nếu
-thiết bị vẫn từ chối, nút PTZ tự chuyển `unavailable`.
+`device.list.DetailInfoQuery`), không phải host tài khoản — host tài khoản trả `12100` (không có
+quyền) cho camera đám mây. Không dùng `streamEntryAddrV4` vì đó là host MQTT (`:8883`).
+Integration thử lần lượt các host ứng viên (raw → cache → DetailInfoQuery → host tài khoản) và
+giữ host chạy được; request tới host stream-entry dùng thêm CA riêng của Imou
+(`certificates/*.crt`) nên không bị `CERTIFICATE_VERIFY_FAILED`. Chỉ tạo nút khi model thiết
+bị/trường `ability` khai báo có PTZ; nếu tất cả host đều bị từ chối, nút PTZ tự chuyển
+`unavailable`.
 
 Muốn điều khiển bằng automation hoặc dashboard, dùng service `imou_connect.ptz_move`:
 
@@ -131,6 +132,7 @@ Camera entity được tạo sau khi lưu cấu hình và cấu hình đã lưu 
 | Không thấy nút PTZ | Cập nhật lên `0.1.23`. Nút chỉ xuất hiện khi model thiết bị khai báo PTZ; kiểm tra thiết bị có PTZ thật không, thử phát trực tiếp trong app Imou Life, và xem log đã che thông tin |
 | Bấm PTZ báo `code=12100` | Cập nhật lên `0.1.25`: lệnh phải gửi tới host stream-entry (`streamEntryAddr`) của thiết bị. Nếu vẫn lỗi, thiết bị/tài khoản không cho phép PTZ qua cloud; nút sẽ tự chuyển `unavailable` và log chỉ còn DEBUG |
 | PTZ báo `CERTIFICATE_VERIFY_FAILED` | Cập nhật lên `0.1.25`: host stream-entry ký bằng CA riêng của Imou; bản mới nạp `certificates/*.crt` cho request PTZ |
+| PTZ vẫn lỗi sau `0.1.26` | Vào **Settings → Imou Connect → ba chấm → Download diagnostics**, gửi phần thiết bị (che sẵn password/token/p2p/URL) gồm `streamEntryAddr`, `streamEntryAddrV3/V4` và `thing_model.services` để kiểm tra tiếp |
 
 Khi báo lỗi, gửi log Home Assistant và thuộc tính chẩn đoán. **Không gửi mật khẩu, OTP hoặc token vào issue/chat.**
 

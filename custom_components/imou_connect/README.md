@@ -10,6 +10,14 @@ Custom integration này đăng nhập trực tiếp Imou Life bằng account/pas
 4. Nhập tài khoản và mật khẩu Imou Life.
 5. Nếu Imou yêu cầu CAPTCHA, mở liên kết xác minh do config flow hiển thị. Với mã `12112`, nhập mã SMS/email sáu số ở bước tiếp theo.
 
+**Nâng cấp lên `0.1.26`:** giải nén `imou_connect-custom-component-0.1.26.zip`, chép đè mã trong `/config/custom_components/imou_connect`, rồi restart Home Assistant; giữ nguyên config entry và cấu hình hiện có.
+
+Bản `0.1.26`:
+
+- **Sửa lấy host PTZ:** dùng `device.list.DetailInfoQuery` (API app gọi lúc tải danh sách thiết bị) để lấy `streamEntryAddr` singular; `CommonDeviceDetailsInfoGetByDeviceId` trả `12100`/`has no auth` nên bị bỏ.
+- **Thử lần lượt nhiều host:** raw `streamEntryAddr`/`streamEntryAddrV3` → host đã cache → host từ DetailInfoQuery → host tài khoản; host nào chạy được thì cache lại. Host MQTT (`mqtt`/`:8883`) bị bỏ qua.
+- **Thêm `diagnostics.py`:** tải chẩn đoán (Settings → Imou Connect → Download diagnostics) để xem `streamEntryAddr`, candidate host và service PTZ trong thing model, có che password/token/p2p/URL.
+
 **Nâng cấp lên `0.1.25`:** giải nén `imou_connect-custom-component-0.1.25.zip`, chép đè mã trong `/config/custom_components/imou_connect`, rồi restart Home Assistant; giữ nguyên config entry và cấu hình hiện có.
 
 Bản `0.1.25`:

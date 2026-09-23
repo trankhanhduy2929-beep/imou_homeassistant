@@ -578,8 +578,52 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
             raise UpdateFailed("Imou device is no longer available")
         if device_id in self._ptz_rejected:
             raise UpdateFailed("Imou PTZ control is not available for this device")
+        discovered = (
+            stream_entry_host(device.raw),
+            self._ptz_host_cache.get(device.device_id),
+        )
+        last_error: ImouApiError | None = None
+        for host in dict.fromkeys(item for item in discovered if item):
+            last_error = await self._async_try_ptz(
+                device, channel_id, horizontal, vertical, zoom, duration, host
+            )
+            if last_error is None:
+                self._ptz_host_cache[device.device_id] = host
+                return
+        fetched = await self._async_fetch_ptz_host(device.device_id)
+        if fetched and fetched not in discovered:
+            last_error = await self._async_try_ptz(
+                device, channel_id, horizontal, vertical, zoom, duration, fetched
+            )
+            if last_error is None:
+                self._ptz_host_cache[device.device_id] = fetched
+                return
+        last_error = await self._async_try_ptz(
+            device, channel_id, horizontal, vertical, zoom, duration, None
+        )
+        if last_error is None:
+            return
+        if last_error.code in PTZ_NO_AUTHORITY_CODES or last_error.code in (401, 403):
+            self._ptz_rejected.add(device_id)
+            _LOGGER.debug(
+                "Imou PTZ not permitted device=%s code=%s", device_id, last_error.code
+            )
+        raise UpdateFailed(
+            f"Could not move Imou PTZ camera: {last_error}"
+        ) from last_error
+
+    async def _async_try_ptz(
+        self,
+        device: ImouDevice,
+        channel_id: str,
+        horizontal: float,
+        vertical: float,
+        zoom: float,
+        duration: int,
+        host: str | None,
+    ) -> ImouApiError | None:
+        """Attempt one PTZ call and return the API error on failure."""
         try:
-            host = await self._async_ptz_host(device)
             await self.api.async_ptz_move(
                 device.device_id,
                 str(channel_id),
@@ -592,30 +636,17 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
         except ImouAuthError as err:
             raise ConfigEntryAuthFailed from err
         except ImouApiError as err:
-            if err.code in PTZ_NO_AUTHORITY_CODES or err.code in (401, 403):
-                self._ptz_rejected.add(device_id)
-                _LOGGER.debug(
-                    "Imou PTZ not permitted device=%s code=%s", device_id, err.code
-                )
-            raise UpdateFailed(f"Could not move Imou PTZ camera: {err}") from err
+            return err
+        return None
 
-    async def _async_ptz_host(self, device: ImouDevice) -> str | None:
-        """Resolve the stream-entry host PTZ requests must target."""
-        host = stream_entry_host(device.raw) or self._ptz_host_cache.get(
-            device.device_id
-        )
-        if host:
-            return host
+    async def _async_fetch_ptz_host(self, device_id: str) -> str | None:
         try:
-            host = await self.api.async_get_stream_entry_host(device.device_id)
+            return await self.api.async_get_stream_entry_host(device_id)
         except ImouAuthError:
             raise
         except ImouApiError as err:
             _LOGGER.debug("Imou stream entry unavailable code=%s", err.code)
             return None
-        if host:
-            self._ptz_host_cache[device.device_id] = host
-        return host
 
     def ptz_available(self, device_id: str) -> bool:
         """Return whether PTZ control is still expected to work for a device."""

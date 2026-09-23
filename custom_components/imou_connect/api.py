@@ -2478,23 +2478,32 @@ class ImouApiClient:
     async def async_get_stream_entry_host(self, device_id: str) -> str | None:
         """Return the device stream-entry host used for cloud PTZ.
 
-        Mirrors the APK `device.list.CommonDeviceDetailsInfoGetByDeviceId` call
-        that populates `DHDevice.streamEntryAddr` before PTZ is sent. Note the
-        device `streamEntryAddrV4` field is the MQTT host, not this HTTP entry.
+        The APK sets `DHDevice.streamEntryAddr` from the device detail query
+        (`device.list.DetailInfoQuery`) before sending `things.ptz.PtzMove`.
+        Note the device `streamEntryAddrV4` field is the MQTT host, not this
+        HTTP entry.
         """
         data = await self.async_request(
-            "device.list.CommonDeviceDetailsInfoGetByDeviceId",
+            "device.list.DetailInfoQuery",
             "",
-            {"deviceId": device_id},
+            {
+                "familyId": "",
+                "groupId": "-1",
+                "limit": 64,
+                "offset": 0,
+                "transferStr": "",
+            },
         )
         devices = data.get("deviceList") if isinstance(data, Mapping) else None
         if isinstance(devices, list):
             for item in devices:
-                if isinstance(item, Mapping) and (
-                    host := stream_entry_host(item)
-                ):
+                if not isinstance(item, Mapping):
+                    continue
+                if _api_identifier(item, "deviceId", "deviceid") != device_id:
+                    continue
+                if host := stream_entry_host(item):
                     return host
-        return stream_entry_host(data)
+        return None
 
     @staticmethod
     def _group_control_enabled(group_control_flag: str) -> bool:
