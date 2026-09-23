@@ -98,6 +98,7 @@ Camera entity được tạo sau khi lưu cấu hình và cấu hình đã lưu 
 | Sensor không tự cập nhật | Kiểm tra kết nối MQTT (`mqtt_connected`) và thử reload integration; polling 30 giây là dự phòng |
 | Camera không phát được | Mở **Configure**, chọn lại camera để được kiểm tra RTSP và báo nguyên nhân. Nếu luồng chính (main, HEVC nặng) không phát, thử đường dẫn `subtype=1` (luồng phụ) |
 | Chỉ thấy vài entity, thiếu setting/nút | Cập nhật lên `0.1.20` rồi reload integration để discovery/model và entity được làm mới; nếu vẫn thiếu, gửi log đã che thông tin |
+| Log lặp `DeviceListPageGet code=404` | Cập nhật lên `0.1.22`: endpoint legacy không có trên endpoint khu vực đó sẽ được ghi nhớ 1 giờ và chỉ ghi DEBUG, không ảnh hưởng thiết bị |
 
 Khi báo lỗi, gửi log Home Assistant và thuộc tính chẩn đoán. **Không gửi mật khẩu, OTP hoặc token vào issue/chat.**
 

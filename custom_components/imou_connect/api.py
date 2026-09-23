@@ -236,6 +236,15 @@ class ImouMqttUnavailable(ImouConnectionError):
     """The APK-compatible Imou MQTT transport is not currently available."""
 
 
+class _ImouLegacyEndpointUnavailable(ImouApiError):
+    """The legacy device-list endpoint is not served by this regional host."""
+
+
+_LEGACY_DEVICE_LIST_API = "things.model.DeviceListPageGet"
+_LEGACY_DISCOVERY_RETRY_SECONDS = 3600
+_LEGACY_DISCOVERY_CACHE_SIZE = 16
+
+
 @dataclass(slots=True)
 class ImouCredentials:
     """Current signing credentials."""
@@ -863,6 +872,8 @@ class ImouApiClient:
         self._iot_control_modes: dict[tuple[str, str, str], str] = {}
         self._family_ids: tuple[str, ...] = ()
         self._family_cache_expires = 0.0
+        self._legacy_discovery_retry_after: dict[str, float] = {}
+        self._legacy_discovery_lock = asyncio.Lock()
 
     @staticmethod
     def _normalize_base_url(value: str) -> str:
@@ -920,6 +931,26 @@ class ImouApiClient:
     def set_mqtt_request(self, callback: MqttRequestCallback | None) -> None:
         """Attach the live APK-compatible MQTT request transport."""
         self._mqtt_request = callback
+
+    def _mark_legacy_discovery_unavailable(
+        self, base_url: str
+    ) -> _ImouLegacyEndpointUnavailable:
+        now = time.monotonic()
+        cache = self._legacy_discovery_retry_after
+        cache[base_url] = now + _LEGACY_DISCOVERY_RETRY_SECONDS
+        while len(cache) > _LEGACY_DISCOVERY_CACHE_SIZE:
+            oldest = min(cache.items(), key=lambda item: item[1])[0]
+            del cache[oldest]
+        _LOGGER.debug(
+            "Imou legacy device list unavailable api=%s host=%s "
+            "retry_after_seconds=%s",
+            _LEGACY_DEVICE_LIST_API,
+            urlparse(base_url).hostname or base_url,
+            _LEGACY_DISCOVERY_RETRY_SECONDS,
+        )
+        return _ImouLegacyEndpointUnavailable(
+            "Imou legacy device list endpoint unavailable", 404
+        )
 
     async def async_set_client_push_config(
         self,
@@ -1730,8 +1761,27 @@ class ImouApiClient:
         signing_credentials = credentials or self._credentials
         if signing_credentials is None:
             raise ImouAuthError("No signing credentials")
+        request_base_url = base_url or self._base_url
+        if (
+            api_name == _LEGACY_DEVICE_LIST_API
+            and time.monotonic()
+            < self._legacy_discovery_retry_after.get(request_base_url, 0.0)
+        ):
+            _LOGGER.debug(
+                "Imou legacy device list skipped api=%s host=%s",
+                _LEGACY_DEVICE_LIST_API,
+                urlparse(request_base_url).hostname or request_base_url,
+            )
+            raise _ImouLegacyEndpointUnavailable(
+                "Imou legacy device list endpoint unavailable", 404
+            )
         effective_revision = revision or SIGNATURE_REVISION
         effective_client_ua = client_ua or self._client_ua
+        legacy_first_page = (
+            api_name == _LEGACY_DEVICE_LIST_API
+            and isinstance(data, Mapping)
+            and data.get("pageId") == 0
+        )
         method = "POST"
         path = f"/pcs/v1/{api_name}"
         body = compact_json({"data": data}).encode()
@@ -1782,7 +1832,6 @@ class ImouApiClient:
         )
         if signing_credentials.session_id is not None:
             headers["x-pcs-session-id"] = signing_credentials.session_id
-        request_base_url = base_url or self._base_url
         url = f"{request_base_url}{path}"
         try:
             async with (
@@ -1820,12 +1869,27 @@ class ImouApiClient:
                     self._clock_offset = offset
             except ValueError:
                 pass
-        try:
-            payload = json.loads(raw)
-        except (UnicodeDecodeError, json.JSONDecodeError) as err:
-            raise ImouConnectionError(
-                f"Invalid response from {api_name} (HTTP {status})"
-            ) from err
+        legacy_unavailable = (
+            status == 404 and api_name == _LEGACY_DEVICE_LIST_API
+        )
+        if legacy_unavailable:
+            try:
+                payload = json.loads(raw)
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                payload = None
+        else:
+            try:
+                payload = json.loads(raw)
+            except (UnicodeDecodeError, json.JSONDecodeError) as err:
+                raise ImouConnectionError(
+                    f"Invalid response from {api_name} (HTTP {status})"
+                ) from err
+        if payload is None:
+            if legacy_first_page:
+                raise self._mark_legacy_discovery_unavailable(request_base_url) from None
+            raise _ImouLegacyEndpointUnavailable(
+                "Imou legacy device list endpoint unavailable", 404
+            ) from None
         code = payload.get("code")
         try:
             numeric_code = int(code)
@@ -1839,7 +1903,14 @@ class ImouApiClient:
                 "iot.control.GetIotProperties",
                 "iot.control.GetProperties",
             }
-            log_level = logging.DEBUG if is_property_rejection else logging.WARNING
+            is_unavailable_legacy = (
+                status == 404 and api_name == _LEGACY_DEVICE_LIST_API
+            )
+            log_level = (
+                logging.DEBUG
+                if is_property_rejection or is_unavailable_legacy
+                else logging.WARNING
+            )
             _LOGGER.log(
                 log_level,
                 "Imou API rejected request api=%s code=%s http_status=%s "
@@ -1886,6 +1957,12 @@ class ImouApiClient:
         if status in {401, 403} or self._looks_like_auth_error(numeric_code, payload):
             raise ImouAuthError(
                 str(payload.get("desc") or "Authentication failed"), numeric_code
+            )
+        if legacy_unavailable:
+            if legacy_first_page:
+                raise self._mark_legacy_discovery_unavailable(request_base_url)
+            raise _ImouLegacyEndpointUnavailable(
+                "Imou legacy device list endpoint unavailable", 404
             )
         if status >= 500:
             raise ImouConnectionError(f"Imou cloud HTTP {status}")
@@ -1998,6 +2075,8 @@ class ImouApiClient:
                 raw_devices = await list_devices()
             except ImouAuthError:
                 raise
+            except _ImouLegacyEndpointUnavailable:
+                continue
             except ImouApiError as err:
                 last_error = err
                 continue
@@ -2332,12 +2411,13 @@ class ImouApiClient:
         )
 
     async def _list_legacy_devices(self) -> list[Mapping[str, Any]]:
-        return await self._list_device_pages(
-            "things.model.DeviceListPageGet",
-            "3421",
-            {"limit": 100, "type": ""},
-            legacy=True,
-        )
+        async with self._legacy_discovery_lock:
+            return await self._list_device_pages(
+                _LEGACY_DEVICE_LIST_API,
+                "3421",
+                {"limit": 100, "type": ""},
+                legacy=True,
+            )
 
     async def async_query_model(
         self, product_id: str, md5_value: str = ""
