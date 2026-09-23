@@ -34,10 +34,17 @@ from .const import (
     PROTOCOL_VERSION,
     PTZ_MOVE_API,
     PTZ_MOVE_REVISION,
+    PTZ_NO_AUTHORITY_CODES,
     PTZ_STEP_DURATION_MS,
     SIGNATURE_REVISION,
 )
-from .models import ImouDevice, _api_identifier, as_bool, device_from_api
+from .models import (
+    ImouDevice,
+    _api_identifier,
+    as_bool,
+    device_from_api,
+    stream_entry_host,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1909,9 +1916,14 @@ class ImouApiClient:
             is_unavailable_legacy = (
                 status == 404 and api_name == _LEGACY_DEVICE_LIST_API
             )
+            is_ptz_no_authority = (
+                api_name == PTZ_MOVE_API and numeric_code in PTZ_NO_AUTHORITY_CODES
+            )
             log_level = (
                 logging.DEBUG
-                if is_property_rejection or is_unavailable_legacy
+                if is_property_rejection
+                or is_unavailable_legacy
+                or is_ptz_no_authority
                 else logging.WARNING
             )
             _LOGGER.log(
@@ -2437,6 +2449,28 @@ class ImouApiClient:
             },
         )
 
+    async def async_get_stream_entry_host(
+        self,
+        product_id: str,
+        device_id: str,
+        *,
+        group_control_flag: str = "0",
+    ) -> str | None:
+        """Return the device stream-entry host used for cloud PTZ.
+
+        Mirrors the APK `device.info.BasicInfoGetV2` call that populates the
+        device `streamEntryAddr` before PTZ is sent.
+        """
+        payload: dict[str, Any] = {
+            "deviceId": device_id,
+            "needNewSecret": True,
+            "productId": product_id,
+        }
+        if str(group_control_flag).strip():
+            payload["groupControlFlg"] = str(group_control_flag)
+        data = await self.async_request("device.info.BasicInfoGetV2", "", payload)
+        return stream_entry_host(data)
+
     @staticmethod
     def _group_control_enabled(group_control_flag: str) -> bool:
         return str(group_control_flag).strip().casefold() in {"1", "true"}
@@ -2802,24 +2836,39 @@ class ImouApiClient:
         vertical: float,
         zoom: float = 0,
         duration: int = PTZ_STEP_DURATION_MS,
+        host: str | None = None,
     ) -> None:
         """Move PTZ using the recovered cloud API.
 
         The Imou Life app normalizes the axes to ``[-1, 1]`` (pan/tilt use
-        ``+-0.625`` and zoom uses ``+-0.5``) and always sends a duration.
+        ``+-0.625`` and zoom uses ``+-0.5``) and always sends a duration. It
+        targets the device stream-entry host when one is known; the account
+        entry host answers ``12100`` (no authority) for cloud cameras.
         """
-        await self.async_request(
-            PTZ_MOVE_API,
-            PTZ_MOVE_REVISION,
-            {
-                "channelId": channel_id,
-                "deviceId": device_id,
-                "duration": duration,
-                "horizontal": horizontal,
-                "vertical": vertical,
-                "zoom": zoom,
-            },
-        )
+        payload = {
+            "channelId": channel_id,
+            "deviceId": device_id,
+            "duration": duration,
+            "horizontal": horizontal,
+            "vertical": vertical,
+            "zoom": zoom,
+        }
+        if not host:
+            await self.async_request(PTZ_MOVE_API, PTZ_MOVE_REVISION, payload)
+            return
+        if not self.authenticated:
+            await self.async_authenticate()
+        try:
+            await self._request_with_retries(
+                PTZ_MOVE_API,
+                PTZ_MOVE_REVISION,
+                payload,
+                base_url=host,
+            )
+        except ImouAuthError as err:
+            # A device host rejection is a PTZ capability problem, not a lost
+            # account session, so it must not trigger the reauth flow.
+            raise ImouApiError(str(err), err.code) from err
 
     @staticmethod
     def _stream_service_input(

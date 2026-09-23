@@ -10,6 +10,13 @@ Custom integration này đăng nhập trực tiếp Imou Life bằng account/pas
 4. Nhập tài khoản và mật khẩu Imou Life.
 5. Nếu Imou yêu cầu CAPTCHA, mở liên kết xác minh do config flow hiển thị. Với mã `12112`, nhập mã SMS/email sáu số ở bước tiếp theo.
 
+**Nâng cấp lên `0.1.24`:** giải nén `imou_connect-custom-component-0.1.24.zip`, chép đè mã trong `/config/custom_components/imou_connect`, rồi restart Home Assistant; giữ nguyên config entry và cấu hình hiện có.
+
+Bản `0.1.24`:
+
+- **Sửa PTZ trả `code=12100` (không có quyền):** APK gửi `things.ptz.PtzMove` tới host stream-entry của thiết bị (`streamEntryAddrV4`), không phải host tài khoản. Nay integration lấy host từ dữ liệu discovery, hoặc gọi `device.info.BasicInfoGetV2` khi thiếu, rồi ký cùng scheme tài khoản như app.
+- **Không còn spam log:** `12099/12100/12101` của PTZ chỉ ghi DEBUG; nếu thiết bị vẫn từ chối, nút PTZ tự chuyển `unavailable` và ngừng gọi lặp.
+
 **Nâng cấp lên `0.1.23`:** giải nén `imou_connect-custom-component-0.1.23.zip`, chép đè mã trong `/config/custom_components/imou_connect`, rồi restart Home Assistant; giữ nguyên config entry và cấu hình hiện có.
 
 Bản `0.1.23`:

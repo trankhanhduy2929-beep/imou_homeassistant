@@ -8,6 +8,8 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from typing import Any, Final
 
+from .const import PTZ_STREAM_HOST_FIELDS
+
 PRIMITIVE_TYPES = frozenset({"bool", "enum", "int", "float", "double", "text"})
 SENSITIVE_PARTS = (
     "credential",
@@ -223,6 +225,25 @@ def _flatten_ability_text(value: Any) -> str:
     if isinstance(value, (list, tuple, set)):
         return " ".join(_flatten_ability_text(item) for item in value)
     return str(value)
+
+
+def stream_entry_host(raw: Mapping[str, Any]) -> str | None:
+    """Return the device stream-entry base URL used for cloud PTZ.
+
+    Imou Life sends `things.ptz.PtzMove` to the device's `streamEntryAddrV4`
+    host; the account entry host rejects it with code `12100` (no authority).
+    """
+    for key in PTZ_STREAM_HOST_FIELDS:
+        value = raw.get(key)
+        if not isinstance(value, str):
+            continue
+        host = value.strip().rstrip("/")
+        if not host:
+            continue
+        if not host.startswith(("http://", "https://")):
+            host = f"https://{host}"
+        return host
+    return None
 
 
 @dataclass(slots=True, frozen=True)

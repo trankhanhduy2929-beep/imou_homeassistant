@@ -62,8 +62,11 @@ Thiết bị hỗ trợ PTZ sẽ có thêm các **nút bấm** đặt ngay cạn
 
 Mỗi lần bấm gửi một lệnh ngắn 200 ms qua API đám mây `things.ptz.PtzMove`, dùng đúng trục
 chuẩn hóa và dấu như app Imou Life `10.1.6` (`±0.625` cho pan/tilt, `±0.5` cho zoom).
-Integration chỉ tạo nút khi model thiết bị/trường `ability` khai báo có PTZ, nên không phát
-sinh cuộc gọi mạng lúc khởi động.
+Giống app, lệnh được gửi tới **host stream-entry của thiết bị** (`streamEntryAddrV4`), không
+phải host tài khoản — host tài khoản trả `12100` (không có quyền) cho camera đám mây.
+Integration lấy host từ dữ liệu discovery, gọi `device.info.BasicInfoGetV2` khi thiếu, và chỉ
+tạo nút khi model thiết bị/trường `ability` khai báo có PTZ nên không phát sinh cuộc gọi mạng
+lúc khởi động. Nếu thiết bị vẫn từ chối, nút PTZ tự chuyển `unavailable`.
 
 Muốn điều khiển bằng automation hoặc dashboard, dùng service `imou_connect.ptz_move`:
 
@@ -124,6 +127,7 @@ Camera entity được tạo sau khi lưu cấu hình và cấu hình đã lưu 
 | Chỉ thấy vài entity, thiếu setting/nút | Cập nhật lên `0.1.20` rồi reload integration để discovery/model và entity được làm mới; nếu vẫn thiếu, gửi log đã che thông tin |
 | Log lặp `DeviceListPageGet code=404` | Cập nhật lên `0.1.22`: endpoint legacy không có trên endpoint khu vực đó sẽ được ghi nhớ 1 giờ và chỉ ghi DEBUG, không ảnh hưởng thiết bị |
 | Không thấy nút PTZ | Cập nhật lên `0.1.23`. Nút chỉ xuất hiện khi model thiết bị khai báo PTZ; kiểm tra thiết bị có PTZ thật không, thử phát trực tiếp trong app Imou Life, và xem log đã che thông tin |
+| Bấm PTZ báo `code=12100` | Cập nhật lên `0.1.24`: lệnh phải gửi tới host stream-entry của thiết bị. Nếu vẫn lỗi, thiết bị/tài khoản không cho phép PTZ qua cloud; nút sẽ tự chuyển `unavailable` và log chỉ còn DEBUG |
 
 Khi báo lỗi, gửi log Home Assistant và thuộc tính chẩn đoán. **Không gửi mật khẩu, OTP hoặc token vào issue/chat.**
 

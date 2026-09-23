@@ -98,6 +98,11 @@ class ImouPtzButton(ImouChannelEntity, ButtonEntity):
         self.direction = direction
         self._horizontal, self._vertical, self._zoom = PTZ_DIRECTIONS[direction]
 
+    @property
+    def available(self) -> bool:
+        """Return availability, honoring a rejected PTZ capability."""
+        return super().available and self.coordinator.ptz_available(self.device_id)
+
     async def async_press(self) -> None:
         """Send one short PTZ move for this direction."""
         if not self._definition_available:
