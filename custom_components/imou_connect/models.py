@@ -6,7 +6,7 @@ import json
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import Any, Final
 
 PRIMITIVE_TYPES = frozenset({"bool", "enum", "int", "float", "double", "text"})
 SENSITIVE_PARTS = (
@@ -201,6 +201,30 @@ def is_online_status(value: Any) -> bool | None:
     return None
 
 
+ABILITY_KEYS: Final = ("ability", "abilities", "capability", "capabilities")
+
+
+def _raw_declares_ability(raw: Mapping[str, Any], ability: str) -> bool:
+    """Return whether raw device metadata lists a named capability."""
+    needle = ability.lower()
+    for key, value in raw.items():
+        if str(key).lower() not in ABILITY_KEYS:
+            continue
+        if needle in _flatten_ability_text(value).lower():
+            return True
+    return False
+
+
+def _flatten_ability_text(value: Any) -> str:
+    if isinstance(value, Mapping):
+        return " ".join(
+            f"{key} {_flatten_ability_text(item)}" for key, item in value.items()
+        )
+    if isinstance(value, (list, tuple, set)):
+        return " ".join(_flatten_ability_text(item) for item in value)
+    return str(value)
+
+
 @dataclass(slots=True, frozen=True)
 class ImouChannel:
     """A camera or recorder channel."""
@@ -286,6 +310,24 @@ class ThingModel:
                 break
         return tuple(result)
 
+    def _identifiers(self) -> tuple[str, ...]:
+        """Return every property and service identifier of the model."""
+        return tuple(prop.identifier for prop in self.properties) + tuple(
+            service.identifier for service in self.services
+        )
+
+    @property
+    def supports_ptz(self) -> bool:
+        """Return whether the thing model advertises pan/tilt control."""
+        return any("ptz" in identifier.lower() for identifier in self._identifiers())
+
+    @property
+    def supports_zoom(self) -> bool:
+        """Return whether the thing model advertises zoom control."""
+        return any(
+            "zoom" in identifier.lower() for identifier in self._identifiers()
+        )
+
 
 @dataclass(slots=True, frozen=True)
 class ImouDevice:
@@ -311,6 +353,16 @@ class ImouDevice:
     def online(self) -> bool | None:
         """Return normalized availability."""
         return is_online_status(self.status)
+
+    @property
+    def supports_ptz(self) -> bool:
+        """Return whether this device exposes PTZ controls."""
+        return self.thing_model.supports_ptz or _raw_declares_ability(self.raw, "ptz")
+
+    @property
+    def supports_zoom(self) -> bool:
+        """Return whether this device exposes zoom controls."""
+        return self.thing_model.supports_zoom or self.supports_ptz
 
     def with_properties(self, values: Mapping[str, Any]) -> ImouDevice:
         """Return a copy with fresh property values."""

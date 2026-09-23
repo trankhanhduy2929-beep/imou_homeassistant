@@ -10,6 +10,14 @@ Custom integration này đăng nhập trực tiếp Imou Life bằng account/pas
 4. Nhập tài khoản và mật khẩu Imou Life.
 5. Nếu Imou yêu cầu CAPTCHA, mở liên kết xác minh do config flow hiển thị. Với mã `12112`, nhập mã SMS/email sáu số ở bước tiếp theo.
 
+**Nâng cấp lên `0.1.23`:** giải nén `imou_connect-custom-component-0.1.23.zip`, chép đè mã trong `/config/custom_components/imou_connect`, rồi restart Home Assistant; giữ nguyên config entry và cấu hình hiện có.
+
+Bản `0.1.23`:
+
+- **Điều khiển PTZ:** thiết bị có PTZ (thing model có `PtzMove*`/`PtzStepMove*`/`std_reset_ptz`/`zoomFocus` hoặc trường `ability` chứa `ptz`) được tạo nút bấm cho 8 hướng (lên/xuống/trái/phải và 4 chéo) cùng zoom vào/ra, đặt cạnh thiết bị. Mỗi lần bấm gửi lệnh ngắn 200 ms qua API đám mây `things.ptz.PtzMove` với đúng trục chuẩn hóa và dấu như APK 10.1.6 (`±0.625` cho pan/tilt, `±0.5` cho zoom).
+- **Service `imou_connect.ptz_move`:** cho automation/dashboard, tham số `device_id`, `channel_id` (tuỳ chọn), `direction` và `duration` (mặc định 200 ms).
+- Không thêm cuộc gọi mạng khi khởi động; nút PTZ chỉ xuất hiện khi thiết bị tự khai báo hỗ trợ.
+
 **Nâng cấp lên `0.1.22`:** giải nén `imou_connect-custom-component-0.1.22.zip`, chép đè mã trong `/config/custom_components/imou_connect`, rồi restart Home Assistant; giữ nguyên config entry và cấu hình hiện có.
 
 Bản `0.1.22`:
@@ -120,6 +128,7 @@ Bản `0.1.5` đã sửa trạng thái `validation pending` sau OTP bằng clien
 - Connectivity binary sensor cho device và từng channel.
 - Thing-model primitive property thành `sensor`, `binary_sensor`, `switch`, `number`, `select` hoặc `text`.
 - Thing-model service không có input thành `button`.
+- Nút PTZ (8 hướng và zoom vào/ra) cho thiết bị hỗ trợ PTZ, kèm service `imou_connect.ptz_move`.
 
 Property chứa tên nhạy cảm như password, token, secret, credential hoặc access key bị loại bỏ. Signed media URL không được lưu vào state hay log.
 

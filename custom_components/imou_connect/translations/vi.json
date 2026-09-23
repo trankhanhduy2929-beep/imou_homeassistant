@@ -91,5 +91,29 @@
     "abort": {
       "no_devices": "Chưa có camera để chọn. Kiểm tra thiết bị thuộc tài khoản hoặc được chia sẻ có xuất hiện trong ứng dụng Imou Life Android, sau đó tải lại tích hợp Imou Connect và chờ tải xong thiết bị. Không cần xóa tích hợp hoặc thông tin đăng nhập đã lưu."
     }
+  },
+  "services": {
+    "ptz_move": {
+      "name": "Di chuyển PTZ",
+      "description": "Di chuyển camera PTZ Imou theo một hướng.",
+      "fields": {
+        "device_id": {
+          "name": "Device ID",
+          "description": "Serial thiết bị Imou cần điều khiển."
+        },
+        "channel_id": {
+          "name": "Channel ID",
+          "description": "Kênh cần điều khiển; bỏ trống để dùng kênh đầu tiên."
+        },
+        "direction": {
+          "name": "Hướng",
+          "description": "Hướng pan, tilt hoặc zoom."
+        },
+        "duration": {
+          "name": "Thời lượng",
+          "description": "Thời gian giữ lệnh di chuyển, tính bằng mili giây."
+        }
+      }
+    }
   }
 }

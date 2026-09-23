@@ -32,6 +32,9 @@ from .const import (
     PC_ENTRY_HOST_FALLBACK,
     PROJECT_ID,
     PROTOCOL_VERSION,
+    PTZ_MOVE_API,
+    PTZ_MOVE_REVISION,
+    PTZ_STEP_DURATION_MS,
     SIGNATURE_REVISION,
 )
 from .models import ImouDevice, _api_identifier, as_bool, device_from_api
@@ -2798,12 +2801,16 @@ class ImouApiClient:
         horizontal: float,
         vertical: float,
         zoom: float = 0,
-        duration: int = 500,
+        duration: int = PTZ_STEP_DURATION_MS,
     ) -> None:
-        """Move PTZ using the recovered cloud API."""
+        """Move PTZ using the recovered cloud API.
+
+        The Imou Life app normalizes the axes to ``[-1, 1]`` (pan/tilt use
+        ``+-0.625`` and zoom uses ``+-0.5``) and always sends a duration.
+        """
         await self.async_request(
-            "things.ptz.PtzMove",
-            "71798",
+            PTZ_MOVE_API,
+            PTZ_MOVE_REVISION,
             {
                 "channelId": channel_id,
                 "deviceId": device_id,

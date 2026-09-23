@@ -5,16 +5,22 @@ from __future__ import annotations
 import asyncio
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import ImouApiClient
 from .captcha import async_register_captcha_views
 from .const import (
+    ATTR_DIRECTION,
+    ATTR_DURATION,
     CONF_ACCOUNT,
     CONF_MAX_CONCURRENT_REQUESTS,
     CONF_MAX_PROPERTIES,
@@ -27,6 +33,9 @@ from .const import (
     DEFAULT_POLL_INTERVAL,
     DEFAULT_REQUEST_TIMEOUT,
     DOMAIN,
+    PTZ_DIRECTIONS,
+    PTZ_STEP_DURATION_MS,
+    SERVICE_PTZ_MOVE,
 )
 from .coordinator import ImouDataUpdateCoordinator
 from .media import configured_local_cameras
@@ -62,10 +71,63 @@ class ImouRuntime:
 type ImouConfigEntry = ConfigEntry[ImouRuntime]
 
 
+SERVICE_PTZ_MOVE_SCHEMA = vol.Schema(
+    {
+        vol.Required("device_id"): cv.string,
+        vol.Optional("channel_id"): cv.string,
+        vol.Required(ATTR_DIRECTION): vol.In(sorted(PTZ_DIRECTIONS)),
+        vol.Optional(ATTR_DURATION, default=PTZ_STEP_DURATION_MS): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=60000)
+        ),
+    }
+)
+
+
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Register the server-side CAPTCHA endpoints."""
+    """Register the server-side CAPTCHA endpoints and the PTZ service."""
     async_register_captcha_views(hass)
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_PTZ_MOVE,
+        _async_handle_ptz_move,
+        schema=SERVICE_PTZ_MOVE_SCHEMA,
+    )
     return True
+
+
+async def _async_handle_ptz_move(call: ServiceCall) -> None:
+    """Move a PTZ camera channel using the recovered cloud API."""
+    data: dict[str, Any] = dict(call.data)
+    device_id = str(data["device_id"])
+    direction = str(data[ATTR_DIRECTION])
+    requested_channel = data.get("channel_id")
+    duration = int(data.get(ATTR_DURATION, PTZ_STEP_DURATION_MS))
+    horizontal, vertical, zoom = PTZ_DIRECTIONS[direction]
+    for entry in call.hass.config_entries.async_entries(DOMAIN):
+        runtime = getattr(entry, "runtime_data", None)
+        coordinator = getattr(runtime, "coordinator", None)
+        if coordinator is None:
+            continue
+        device = coordinator.device(device_id)
+        if device is None:
+            continue
+        channel_id = (
+            str(requested_channel)
+            if requested_channel
+            else coordinator._default_channel_id(device)
+        )
+        if not channel_id:
+            raise HomeAssistantError(f"Imou device {device_id} has no channel")
+        await coordinator.async_ptz_move(
+            device.device_id,
+            channel_id,
+            horizontal=horizontal,
+            vertical=vertical,
+            zoom=zoom,
+            duration=duration,
+        )
+        return
+    raise HomeAssistantError(f"Imou device {device_id} was not found")
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ImouConfigEntry) -> bool:

@@ -1,0 +1,45 @@
+ptz_move:
+  name: Di chuyển PTZ
+  description: Di chuyển camera PTZ Imou theo một hướng bằng API đám mây.
+  fields:
+    device_id:
+      name: Device ID
+      description: ID thiết bị Imou (serial) cần điều khiển.
+      required: true
+      example: "AAABBBCCCDDD"
+      selector:
+        text:
+    channel_id:
+      name: Channel ID
+      description: ID kênh cần điều khiển; bỏ trống để dùng kênh đầu tiên.
+      required: false
+      example: "0"
+      selector:
+        text:
+    direction:
+      name: Hướng
+      description: Hướng di chuyển hoặc zoom.
+      required: true
+      selector:
+        select:
+          options:
+            - up
+            - down
+            - left
+            - right
+            - left_up
+            - left_down
+            - right_up
+            - right_down
+            - zoom_in
+            - zoom_out
+    duration:
+      name: Thời lượng
+      description: Thời gian giữ lệnh di chuyển.
+      required: false
+      default: 200
+      selector:
+        number:
+          min: 1
+          max: 60000
+          unit_of_measurement: ms

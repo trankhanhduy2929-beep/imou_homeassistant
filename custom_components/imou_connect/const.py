@@ -73,3 +73,30 @@ ATTR_PROPERTY_REF: Final = "property_ref"
 ATTR_PRODUCT_ID: Final = "product_id"
 ATTR_REALTIME_EVENT: Final = "realtime_event"
 EVENT_REALTIME: Final = f"{DOMAIN}_event"
+
+# PTZ control recovered from Imou Life 10.1.6: the mobile app always uses the
+# cloud `things.ptz.PtzMove` API with normalized axes and a millisecond duration.
+PTZ_MOVE_API: Final = "things.ptz.PtzMove"
+PTZ_MOVE_REVISION: Final = "71798"
+PTZ_STEP_DURATION_MS: Final = 200
+PTZ_LONG_DURATION_MS: Final = 30000
+PTZ_AXIS_SPEED: Final = 0.625
+PTZ_ZOOM_SPEED: Final = 0.5
+
+# Direction key -> (horizontal, vertical, zoom). Signs match the APK mapping.
+PTZ_DIRECTIONS: Final[dict[str, tuple[float, float, float]]] = {
+    "up": (0.0, PTZ_AXIS_SPEED, 0.0),
+    "down": (0.0, -PTZ_AXIS_SPEED, 0.0),
+    "left": (-PTZ_AXIS_SPEED, 0.0, 0.0),
+    "right": (PTZ_AXIS_SPEED, 0.0, 0.0),
+    "left_up": (-PTZ_AXIS_SPEED, PTZ_AXIS_SPEED, 0.0),
+    "left_down": (-PTZ_AXIS_SPEED, -PTZ_AXIS_SPEED, 0.0),
+    "right_up": (PTZ_AXIS_SPEED, PTZ_AXIS_SPEED, 0.0),
+    "right_down": (PTZ_AXIS_SPEED, -PTZ_AXIS_SPEED, 0.0),
+    "zoom_in": (0.0, 0.0, -PTZ_ZOOM_SPEED),
+    "zoom_out": (0.0, 0.0, PTZ_ZOOM_SPEED),
+}
+
+SERVICE_PTZ_MOVE: Final = "ptz_move"
+ATTR_DIRECTION: Final = "direction"
+ATTR_DURATION: Final = "duration"

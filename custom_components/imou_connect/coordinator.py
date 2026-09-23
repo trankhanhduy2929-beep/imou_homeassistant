@@ -23,7 +23,12 @@ from .api import (
     ImouQrLoginRequired,
     ImouTwoStepVerificationRequired,
 )
-from .const import DOMAIN, EVENT_REALTIME, REALTIME_HOLD_SECONDS
+from .const import (
+    DOMAIN,
+    EVENT_REALTIME,
+    REALTIME_HOLD_SECONDS,
+    PTZ_STEP_DURATION_MS,
+)
 from .models import (
     ImouDevice,
     ThingModel,
@@ -552,3 +557,31 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
         except ImouApiError as err:
             raise UpdateFailed(f"Could not invoke Imou service: {err}") from err
         await self.async_request_refresh()
+
+    async def async_ptz_move(
+        self,
+        device_id: str,
+        channel_id: str,
+        *,
+        horizontal: float,
+        vertical: float,
+        zoom: float = 0.0,
+        duration: int = PTZ_STEP_DURATION_MS,
+    ) -> None:
+        """Move a PTZ camera using the recovered cloud API."""
+        device = self.device(device_id)
+        if device is None:
+            raise UpdateFailed("Imou device is no longer available")
+        try:
+            await self.api.async_ptz_move(
+                device.device_id,
+                str(channel_id),
+                horizontal=horizontal,
+                vertical=vertical,
+                zoom=zoom,
+                duration=duration,
+            )
+        except ImouAuthError as err:
+            raise ConfigEntryAuthFailed from err
+        except ImouApiError as err:
+            raise UpdateFailed(f"Could not move Imou PTZ camera: {err}") from err

@@ -1,4 +1,4 @@
-"""Zero-input thing-model service buttons for Imou Life."""
+"""Zero-input thing-model service buttons and PTZ controls for Imou Life."""
 
 from __future__ import annotations
 
@@ -11,8 +11,26 @@ from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import ImouConfigEntry
-from .entity import ImouEntity, async_setup_dynamic_entities
-from .models import ImouDevice, ThingService
+from .const import PTZ_DIRECTIONS, PTZ_STEP_DURATION_MS
+from .entity import (
+    ImouChannelEntity,
+    ImouEntity,
+    async_setup_dynamic_entities,
+)
+from .models import ImouChannel, ImouDevice, ThingService
+
+PTZ_BUTTON_NAMES: dict[str, str] = {
+    "up": "PTZ lên",
+    "down": "PTZ xuống",
+    "left": "PTZ trái",
+    "right": "PTZ phải",
+    "left_up": "PTZ trái lên",
+    "left_down": "PTZ trái xuống",
+    "right_up": "PTZ phải lên",
+    "right_down": "PTZ phải xuống",
+    "zoom_in": "PTZ zoom vào",
+    "zoom_out": "PTZ zoom ra",
+}
 
 
 async def async_setup_entry(
@@ -27,6 +45,10 @@ async def async_setup_entry(
         for service in device.thing_model.services:
             if service.zero_input:
                 yield ImouServiceButton(coordinator, device, service)
+        if device.supports_ptz:
+            for channel in device.channels:
+                for direction in PTZ_DIRECTIONS:
+                    yield ImouPtzButton(coordinator, device, channel, direction)
 
     async_setup_dynamic_entities(coordinator, entry, async_add_entities, build)
 
@@ -53,3 +75,38 @@ class ImouServiceButton(ImouEntity, ButtonEntity):
         if not self._definition_available:
             raise HomeAssistantError("Imou service is no longer available")
         await self.coordinator.async_invoke_service(self.device_id, self.service)
+
+
+class ImouPtzButton(ImouChannelEntity, ButtonEntity):
+    """Button that nudges one PTZ camera channel in a fixed direction."""
+
+    def __init__(
+        self,
+        coordinator,
+        device: ImouDevice,
+        channel: ImouChannel,
+        direction: str,
+    ) -> None:
+        """Initialize a PTZ direction button."""
+        super().__init__(
+            coordinator,
+            device,
+            channel,
+            unique_suffix=f"ptz_{direction}",
+            name=PTZ_BUTTON_NAMES[direction],
+        )
+        self.direction = direction
+        self._horizontal, self._vertical, self._zoom = PTZ_DIRECTIONS[direction]
+
+    async def async_press(self) -> None:
+        """Send one short PTZ move for this direction."""
+        if not self._definition_available:
+            raise HomeAssistantError("Imou PTZ control is no longer available")
+        await self.coordinator.async_ptz_move(
+            self.device_id,
+            self.channel_id,
+            horizontal=self._horizontal,
+            vertical=self._vertical,
+            zoom=self._zoom,
+            duration=PTZ_STEP_DURATION_MS,
+        )

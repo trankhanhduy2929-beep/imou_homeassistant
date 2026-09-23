@@ -91,5 +91,29 @@
     "abort": {
       "no_devices": "No cameras are available yet. Check that your owned or shared devices appear in the Imou Life Android app, then reload the Imou Connect integration and wait for devices to finish loading. You do not need to delete the integration or saved credentials."
     }
+  },
+  "services": {
+    "ptz_move": {
+      "name": "Move PTZ",
+      "description": "Move an Imou PTZ camera channel in a direction.",
+      "fields": {
+        "device_id": {
+          "name": "Device ID",
+          "description": "Imou device serial to control."
+        },
+        "channel_id": {
+          "name": "Channel ID",
+          "description": "Channel to control; defaults to the first channel."
+        },
+        "direction": {
+          "name": "Direction",
+          "description": "Pan, tilt, or zoom direction."
+        },
+        "duration": {
+          "name": "Duration",
+          "description": "How long to keep moving, in milliseconds."
+        }
+      }
+    }
   }
 }

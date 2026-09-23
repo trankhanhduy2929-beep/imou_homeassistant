@@ -47,10 +47,34 @@ Khi token hết hạn hoặc Imou yêu cầu xác minh lại, Home Assistant s�
 - **Binary sensor chuyển động** và **phát hiện người** theo channel (nhận qua MQTT push gần như tức thời, polling là dự phòng).
 - **Thing-model property** thành `sensor`, `binary_sensor`, `switch`, `number`, `select` hoặc `text`.
 - **Button** cho service thing-model không có input.
+- **Nút PTZ** (8 hướng và zoom vào/ra) cho thiết bị tự khai báo hỗ trợ PTZ.
 
 Các thuộc tính chẩn đoán an toàn (không chứa URL ký/token):
 
 - Cảm biến chuyển động/người: `mqtt_connected`, `alarm_poll`.
+
+## PTZ (tuỳ theo model)
+
+Thiết bị hỗ trợ PTZ sẽ có thêm các **nút bấm** đặt ngay cạnh thiết bị:
+
+- 8 hướng: lên, xuống, trái, phải và 4 hướng chéo.
+- `PTZ zoom vào`, `PTZ zoom ra`.
+
+Mỗi lần bấm gửi một lệnh ngắn 200 ms qua API đám mây `things.ptz.PtzMove`, dùng đúng trục
+chuẩn hóa và dấu như app Imou Life `10.1.6` (`±0.625` cho pan/tilt, `±0.5` cho zoom).
+Integration chỉ tạo nút khi model thiết bị/trường `ability` khai báo có PTZ, nên không phát
+sinh cuộc gọi mạng lúc khởi động.
+
+Muốn điều khiển bằng automation hoặc dashboard, dùng service `imou_connect.ptz_move`:
+
+```yaml
+service: imou_connect.ptz_move
+data:
+  device_id: "AAABBBCCCDDD"   # serial thiết bị Imou
+  channel_id: "0"             # tuỳ chọn, mặc định kênh đầu tiên
+  direction: left             # up/down/left/right/left_up/left_down/right_up/right_down/zoom_in/zoom_out
+  duration: 500               # tuỳ chọn, đơn vị ms (mặc định 200)
+```
 
 ## Realtime
 
@@ -99,6 +123,7 @@ Camera entity được tạo sau khi lưu cấu hình và cấu hình đã lưu 
 | Camera không phát được | Mở **Configure**, chọn lại camera để được kiểm tra RTSP và báo nguyên nhân. Nếu luồng chính (main, HEVC nặng) không phát, thử đường dẫn `subtype=1` (luồng phụ) |
 | Chỉ thấy vài entity, thiếu setting/nút | Cập nhật lên `0.1.20` rồi reload integration để discovery/model và entity được làm mới; nếu vẫn thiếu, gửi log đã che thông tin |
 | Log lặp `DeviceListPageGet code=404` | Cập nhật lên `0.1.22`: endpoint legacy không có trên endpoint khu vực đó sẽ được ghi nhớ 1 giờ và chỉ ghi DEBUG, không ảnh hưởng thiết bị |
+| Không thấy nút PTZ | Cập nhật lên `0.1.23`. Nút chỉ xuất hiện khi model thiết bị khai báo PTZ; kiểm tra thiết bị có PTZ thật không, thử phát trực tiếp trong app Imou Life, và xem log đã che thông tin |
 
 Khi báo lỗi, gửi log Home Assistant và thuộc tính chẩn đoán. **Không gửi mật khẩu, OTP hoặc token vào issue/chat.**
 
@@ -120,6 +145,7 @@ Khi báo lỗi, gửi log Home Assistant và thuộc tính chẩn đoán. **Khô
 - Camera LAN `192.168.5.155` phát được 2304×1296 HEVC 5 frame trong 0.08s qua RTSP TCP và ONVIF kết nối được.
 - Kiểm tra RTSP khi Configure đã thử thật: host không tới trả `stream_timeout`, sai mật khẩu camera trả `stream_unauthorized`.
 - Discovery bổ sung và làm mới entity dùng fixture tổng hợp; **chưa xác minh payload thật của tài khoản từng bị thiếu entity**.
+- PTZ: payload `things.ptz.PtzMove` và các giá trị trục/dấu được đối chiếu từ APK `10.1.6` và kiểm thử tự động; **chưa chạy trên camera PTZ thật**, hãy tự kiểm tra với thiết bị của bạn.
 - Motion/person kích hoạt vật lý có thể chưa được xác minh đầy đủ trên mọi model; hãy tự kiểm tra với camera của bạn.
 
 ## Ghi nhận
