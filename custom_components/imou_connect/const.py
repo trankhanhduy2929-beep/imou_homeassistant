@@ -85,11 +85,9 @@ PTZ_ZOOM_SPEED: Final = 0.5
 # The APK sends PTZ to the device stream-entry host, not the account host; the
 # account host answers `12100` (no authority) for cloud cameras.
 PTZ_NO_AUTHORITY_CODES: Final = frozenset({12099, 12100, 12101})
-PTZ_STREAM_HOST_FIELDS: Final = (
-    "streamEntryAddrV4",
-    "streamEntryAddrV3",
-    "streamEntryAddr",
-)
+# Only the singular `streamEntryAddr` (detail endpoint) is an HTTP(S) entry;
+# `streamEntryAddrV4` is the MQTT host and must not be used for PTZ.
+PTZ_STREAM_HOST_FIELDS: Final = ("streamEntryAddr",)
 
 # Direction key -> (horizontal, vertical, zoom). Signs match the APK mapping.
 PTZ_DIRECTIONS: Final[dict[str, tuple[float, float, float]]] = {

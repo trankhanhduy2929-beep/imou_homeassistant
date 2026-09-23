@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import secrets
+import ssl
 import string
 import time
 from base64 import b64decode, b64encode
@@ -830,6 +831,24 @@ async def _read_bounded(content: Any, max_bytes: int) -> bytes:
             break
         buffer.extend(chunk)
     return bytes(buffer)
+
+
+@lru_cache(maxsize=1)
+def _load_device_ssl_context() -> ssl.SSLContext:
+    """Build a TLS context that also trusts Imou's private CA chain."""
+    context = ssl.create_default_context()
+    certificate_dir = Path(__file__).with_name("certificates")
+    if certificate_dir.is_dir():
+        for certificate in sorted(certificate_dir.glob("*.crt")):
+            try:
+                context.load_verify_locations(cafile=str(certificate))
+            except ssl.SSLError:
+                _LOGGER.debug("Could not load Imou CA %s", certificate.name)
+    return context
+
+
+async def _async_device_ssl_context() -> ssl.SSLContext:
+    return await asyncio.to_thread(_load_device_ssl_context)
 
 
 class ImouApiClient:
@@ -1733,6 +1752,7 @@ class ImouApiClient:
         client_ua: str | None = None,
         capture_response_auth: bool = False,
         expected_error_codes: frozenset[int] = frozenset(),
+        ssl_context: ssl.SSLContext | None = None,
     ) -> dict[str, Any]:
         last_error: ImouConnectionError | None = None
         for attempt in range(3):
@@ -1747,6 +1767,7 @@ class ImouApiClient:
                     client_ua=client_ua,
                     capture_response_auth=capture_response_auth,
                     expected_error_codes=expected_error_codes,
+                    ssl_context=ssl_context,
                 )
             except ImouConnectionError as err:
                 last_error = err
@@ -1767,6 +1788,7 @@ class ImouApiClient:
         client_ua: str | None = None,
         capture_response_auth: bool = False,
         expected_error_codes: frozenset[int] = frozenset(),
+        ssl_context: ssl.SSLContext | None = None,
     ) -> dict[str, Any]:
         signing_credentials = credentials or self._credentials
         if signing_credentials is None:
@@ -1847,7 +1869,11 @@ class ImouApiClient:
             async with (
                 self._semaphore,
                 self._session.post(
-                    url, data=body, headers=headers, timeout=self.request_timeout
+                    url,
+                    data=body,
+                    headers=headers,
+                    timeout=self.request_timeout,
+                    **({"ssl": ssl_context} if ssl_context is not None else {}),
                 ) as response,
             ):
                 raw = await _read_bounded(response.content, MAX_API_RESPONSE_BYTES)
@@ -2449,26 +2475,25 @@ class ImouApiClient:
             },
         )
 
-    async def async_get_stream_entry_host(
-        self,
-        product_id: str,
-        device_id: str,
-        *,
-        group_control_flag: str = "0",
-    ) -> str | None:
+    async def async_get_stream_entry_host(self, device_id: str) -> str | None:
         """Return the device stream-entry host used for cloud PTZ.
 
-        Mirrors the APK `device.info.BasicInfoGetV2` call that populates the
-        device `streamEntryAddr` before PTZ is sent.
+        Mirrors the APK `device.list.CommonDeviceDetailsInfoGetByDeviceId` call
+        that populates `DHDevice.streamEntryAddr` before PTZ is sent. Note the
+        device `streamEntryAddrV4` field is the MQTT host, not this HTTP entry.
         """
-        payload: dict[str, Any] = {
-            "deviceId": device_id,
-            "needNewSecret": True,
-            "productId": product_id,
-        }
-        if str(group_control_flag).strip():
-            payload["groupControlFlg"] = str(group_control_flag)
-        data = await self.async_request("device.info.BasicInfoGetV2", "", payload)
+        data = await self.async_request(
+            "device.list.CommonDeviceDetailsInfoGetByDeviceId",
+            "",
+            {"deviceId": device_id},
+        )
+        devices = data.get("deviceList") if isinstance(data, Mapping) else None
+        if isinstance(devices, list):
+            for item in devices:
+                if isinstance(item, Mapping) and (
+                    host := stream_entry_host(item)
+                ):
+                    return host
         return stream_entry_host(data)
 
     @staticmethod
@@ -2864,6 +2889,7 @@ class ImouApiClient:
                 PTZ_MOVE_REVISION,
                 payload,
                 base_url=host,
+                ssl_context=await _async_device_ssl_context(),
             )
         except ImouAuthError as err:
             # A device host rejection is a PTZ capability problem, not a lost

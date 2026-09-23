@@ -62,11 +62,13 @@ Thiết bị hỗ trợ PTZ sẽ có thêm các **nút bấm** đặt ngay cạn
 
 Mỗi lần bấm gửi một lệnh ngắn 200 ms qua API đám mây `things.ptz.PtzMove`, dùng đúng trục
 chuẩn hóa và dấu như app Imou Life `10.1.6` (`±0.625` cho pan/tilt, `±0.5` cho zoom).
-Giống app, lệnh được gửi tới **host stream-entry của thiết bị** (`streamEntryAddrV4`), không
-phải host tài khoản — host tài khoản trả `12100` (không có quyền) cho camera đám mây.
-Integration lấy host từ dữ liệu discovery, gọi `device.info.BasicInfoGetV2` khi thiếu, và chỉ
-tạo nút khi model thiết bị/trường `ability` khai báo có PTZ nên không phát sinh cuộc gọi mạng
-lúc khởi động. Nếu thiết bị vẫn từ chối, nút PTZ tự chuyển `unavailable`.
+Giống app, lệnh được gửi tới **host stream-entry của thiết bị** (trường `streamEntryAddr` từ
+`device.list.CommonDeviceDetailsInfoGetByDeviceId`), không phải host tài khoản — host tài khoản
+trả `12100` (không có quyền) cho camera đám mây. Không dùng `streamEntryAddrV4` vì đó là host
+MQTT (`:8883`). Request tới host stream-entry dùng thêm CA riêng của Imou
+(`certificates/*.crt`) nên không bị `CERTIFICATE_VERIFY_FAILED`. Integration lấy host khi bấm
+PTZ lần đầu (cache lại) và chỉ tạo nút khi model thiết bị/trường `ability` khai báo có PTZ. Nếu
+thiết bị vẫn từ chối, nút PTZ tự chuyển `unavailable`.
 
 Muốn điều khiển bằng automation hoặc dashboard, dùng service `imou_connect.ptz_move`:
 
@@ -127,7 +129,8 @@ Camera entity được tạo sau khi lưu cấu hình và cấu hình đã lưu 
 | Chỉ thấy vài entity, thiếu setting/nút | Cập nhật lên `0.1.20` rồi reload integration để discovery/model và entity được làm mới; nếu vẫn thiếu, gửi log đã che thông tin |
 | Log lặp `DeviceListPageGet code=404` | Cập nhật lên `0.1.22`: endpoint legacy không có trên endpoint khu vực đó sẽ được ghi nhớ 1 giờ và chỉ ghi DEBUG, không ảnh hưởng thiết bị |
 | Không thấy nút PTZ | Cập nhật lên `0.1.23`. Nút chỉ xuất hiện khi model thiết bị khai báo PTZ; kiểm tra thiết bị có PTZ thật không, thử phát trực tiếp trong app Imou Life, và xem log đã che thông tin |
-| Bấm PTZ báo `code=12100` | Cập nhật lên `0.1.24`: lệnh phải gửi tới host stream-entry của thiết bị. Nếu vẫn lỗi, thiết bị/tài khoản không cho phép PTZ qua cloud; nút sẽ tự chuyển `unavailable` và log chỉ còn DEBUG |
+| Bấm PTZ báo `code=12100` | Cập nhật lên `0.1.25`: lệnh phải gửi tới host stream-entry (`streamEntryAddr`) của thiết bị. Nếu vẫn lỗi, thiết bị/tài khoản không cho phép PTZ qua cloud; nút sẽ tự chuyển `unavailable` và log chỉ còn DEBUG |
+| PTZ báo `CERTIFICATE_VERIFY_FAILED` | Cập nhật lên `0.1.25`: host stream-entry ký bằng CA riêng của Imou; bản mới nạp `certificates/*.crt` cho request PTZ |
 
 Khi báo lỗi, gửi log Home Assistant và thuộc tính chẩn đoán. **Không gửi mật khẩu, OTP hoặc token vào issue/chat.**
 

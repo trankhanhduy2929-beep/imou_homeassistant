@@ -607,11 +607,7 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
         if host:
             return host
         try:
-            host = await self.api.async_get_stream_entry_host(
-                device.product_id,
-                device.device_id,
-                group_control_flag=device.group_control_flag,
-            )
+            host = await self.api.async_get_stream_entry_host(device.device_id)
         except ImouAuthError:
             raise
         except ImouApiError as err:
