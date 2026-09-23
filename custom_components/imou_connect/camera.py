@@ -47,6 +47,7 @@ class ImouConnectLocalCamera(Camera):
     _attr_supported_features = CameraEntityFeature.STREAM
     _attr_has_entity_name = True
     _attr_should_poll = False
+    _attr_icon = "mdi:cctv"
 
     def __init__(
         self,

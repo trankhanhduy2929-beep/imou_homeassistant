@@ -32,6 +32,19 @@ PTZ_BUTTON_NAMES: dict[str, str] = {
     "zoom_out": "PTZ zoom ra",
 }
 
+PTZ_BUTTON_ICONS: dict[str, str] = {
+    "up": "mdi:arrow-up",
+    "down": "mdi:arrow-down",
+    "left": "mdi:arrow-left",
+    "right": "mdi:arrow-right",
+    "left_up": "mdi:arrow-top-left",
+    "left_down": "mdi:arrow-bottom-left",
+    "right_up": "mdi:arrow-top-right",
+    "right_down": "mdi:arrow-bottom-right",
+    "zoom_in": "mdi:magnify-plus-outline",
+    "zoom_out": "mdi:magnify-minus-outline",
+}
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -55,6 +68,8 @@ async def async_setup_entry(
 
 class ImouServiceButton(ImouEntity, ButtonEntity):
     """Button invoking a zero-input Imou thing-model service."""
+
+    _attr_icon = "mdi:gesture-tap-button"
 
     def __init__(self, coordinator, device: ImouDevice, service: ThingService) -> None:
         """Initialize a thing-model service button."""
@@ -96,6 +111,7 @@ class ImouPtzButton(ImouChannelEntity, ButtonEntity):
             name=PTZ_BUTTON_NAMES[direction],
         )
         self.direction = direction
+        self._attr_icon = PTZ_BUTTON_ICONS[direction]
         self._horizontal, self._vertical, self._zoom = PTZ_DIRECTIONS[direction]
 
     @property
