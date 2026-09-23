@@ -47,7 +47,7 @@ Khi token hết hạn hoặc Imou yêu cầu xác minh lại, Home Assistant s�
 - **Binary sensor chuyển động** và **phát hiện người** theo channel (nhận qua MQTT push gần như tức thời, polling là dự phòng).
 - **Thing-model property** thành `sensor`, `binary_sensor`, `switch`, `number`, `select` hoặc `text`.
 - **Button** cho service thing-model không có input.
-- **Nút PTZ** (8 hướng và zoom vào/ra) cho thiết bị tự khai báo hỗ trợ PTZ.
+- **Nút PTZ** (8 hướng và zoom vào/ra) cho thiết bị tự khai báo hỗ trợ PTZ, điều khiển qua ONVIF LAN (ưu tiên).
 
 Các thuộc tính chẩn đoán an toàn (không chứa URL ký/token):
 
@@ -60,16 +60,24 @@ Thiết bị hỗ trợ PTZ sẽ có thêm các **nút bấm** đặt ngay cạn
 - 8 hướng: lên, xuống, trái, phải và 4 hướng chéo.
 - `PTZ zoom vào`, `PTZ zoom ra`.
 
-Mỗi lần bấm gửi một lệnh ngắn 200 ms qua API đám mây `things.ptz.PtzMove`, dùng đúng trục
-chuẩn hóa và dấu như app Imou Life `10.1.6` (`±0.625` cho pan/tilt, `±0.5` cho zoom).
-Giống app, lệnh được gửi tới **host stream-entry của thiết bị** (trường `streamEntryAddr` từ
-`device.list.DetailInfoQuery`), không phải host tài khoản — host tài khoản trả `12100` (không có
-quyền) cho camera đám mây. Không dùng `streamEntryAddrV4` vì đó là host MQTT (`:8883`).
-Integration thử lần lượt các host ứng viên (raw → cache → DetailInfoQuery → host tài khoản) và
-giữ host chạy được; request tới host stream-entry dùng thêm CA riêng của Imou
-(`certificates/*.crt`) nên không bị `CERTIFICATE_VERIFY_FAILED`. Chỉ tạo nút khi model thiết
-bị/trường `ability` khai báo có PTZ; nếu tất cả host đều bị từ chối, nút PTZ tự chuyển
-`unavailable`.
+Integration ưu tiên điều khiển PTZ **qua ONVIF trên mạng LAN**, dùng chính IP và tài khoản local
+bạn đã nhập cho RTSP, nên không phụ thuộc cloud:
+
+- Bật ONVIF trên camera (app Imou Life → cài đặt camera → ONVIF), rồi vào
+  **Settings → Imou Connect → Configure**, chọn camera và đặt **Cổng ONVIF (PTZ)** (mặc định
+  **80**, nhiều model dùng **8000**) cùng ô **Điều khiển PTZ qua ONVIF**.
+- Mỗi lần bấm gửi `ContinuousMove` (vận tốc theo hướng) rồi `Stop` sau ~200 ms, xác thực bằng
+  WSSE UsernameToken với tài khoản local của camera.
+
+Nếu camera không có dịch vụ PTZ ONVIF, integration tự quay về route cloud `things.ptz.PtzMove`
+tới host stream-entry của thiết bị. Lưu ý: một số model bị Imou từ chối cloud PTZ
+(`12100`/`13255`), khi đó hãy dùng ONVIF LAN. Chỉ tạo nút khi model thiết bị/trường `ability`
+khai báo có PTZ.
+
+> Cloud PTZ (dự phòng) dùng trục chuẩn hóa và dấu như app Imou Life `10.1.6` (`±0.625` cho
+> pan/tilt, `±0.5` cho zoom), gửi tới `streamEntryAddr` từ `device.list.DetailInfoQuery` với CA
+> riêng của Imou (`certificates/*.crt`); không dùng `streamEntryAddrV4` vì đó là host MQTT
+> (`:8883`).
 
 Muốn điều khiển bằng automation hoặc dashboard, dùng service `imou_connect.ptz_move`:
 
@@ -130,9 +138,9 @@ Camera entity được tạo sau khi lưu cấu hình và cấu hình đã lưu 
 | Chỉ thấy vài entity, thiếu setting/nút | Cập nhật lên `0.1.20` rồi reload integration để discovery/model và entity được làm mới; nếu vẫn thiếu, gửi log đã che thông tin |
 | Log lặp `DeviceListPageGet code=404` | Cập nhật lên `0.1.22`: endpoint legacy không có trên endpoint khu vực đó sẽ được ghi nhớ 1 giờ và chỉ ghi DEBUG, không ảnh hưởng thiết bị |
 | Không thấy nút PTZ | Cập nhật lên `0.1.23`. Nút chỉ xuất hiện khi model thiết bị khai báo PTZ; kiểm tra thiết bị có PTZ thật không, thử phát trực tiếp trong app Imou Life, và xem log đã che thông tin |
-| Bấm PTZ báo `code=12100` | Cập nhật lên `0.1.25`: lệnh phải gửi tới host stream-entry (`streamEntryAddr`) của thiết bị. Nếu vẫn lỗi, thiết bị/tài khoản không cho phép PTZ qua cloud; nút sẽ tự chuyển `unavailable` và log chỉ còn DEBUG |
-| PTZ báo `CERTIFICATE_VERIFY_FAILED` | Cập nhật lên `0.1.25`: host stream-entry ký bằng CA riêng của Imou; bản mới nạp `certificates/*.crt` cho request PTZ |
-| PTZ vẫn lỗi sau `0.1.26` | Vào **Settings → Imou Connect → ba chấm → Download diagnostics**, gửi phần thiết bị (che sẵn password/token/p2p/URL) gồm `streamEntryAddr`, `streamEntryAddrV3/V4` và `thing_model.services` để kiểm tra tiếp |
+| Bấm PTZ báo `code=12100` / `13255` | Cloud PTZ của model này bị Imou từ chối. Cập nhật lên `0.2.0` và dùng **ONVIF LAN**: bật ONVIF trên camera rồi đặt cổng ONVIF trong **Configure** (80 hoặc 8000) |
+| PTZ không nhúc nhích dù không báo lỗi | Kiểm tra đã bật ONVIF trên camera và đúng **Cổng ONVIF**; thử `http://<IP-camera>/onvif/device_service` từ máy cùng LAN. Nếu sai cổng/tài khoản, sửa trong **Configure** |
+| PTZ vẫn lỗi | Vào **Settings → Imou Connect → ba chấm → Download diagnostics**, gửi phần thiết bị (che sẵn password/token/p2p/URL) để kiểm tra tiếp |
 
 Khi báo lỗi, gửi log Home Assistant và thuộc tính chẩn đoán. **Không gửi mật khẩu, OTP hoặc token vào issue/chat.**
 
@@ -154,7 +162,7 @@ Khi báo lỗi, gửi log Home Assistant và thuộc tính chẩn đoán. **Khô
 - Camera LAN `192.168.5.155` phát được 2304×1296 HEVC 5 frame trong 0.08s qua RTSP TCP và ONVIF kết nối được.
 - Kiểm tra RTSP khi Configure đã thử thật: host không tới trả `stream_timeout`, sai mật khẩu camera trả `stream_unauthorized`.
 - Discovery bổ sung và làm mới entity dùng fixture tổng hợp; **chưa xác minh payload thật của tài khoản từng bị thiếu entity**.
-- PTZ: payload `things.ptz.PtzMove` và các giá trị trục/dấu được đối chiếu từ APK `10.1.6` và kiểm thử tự động; **chưa chạy trên camera PTZ thật**, hãy tự kiểm tra với thiết bị của bạn.
+- PTZ: client ONVIF LAN (WSSE + `ContinuousMove`/`Stop`) và route cloud dự phòng `things.ptz.PtzMove` (trục/dấu đối chiếu từ APK `10.1.6`) được kiểm thử tự động; **chưa chạy trên camera PTZ thật**, hãy tự kiểm tra với thiết bị của bạn.
 - Motion/person kích hoạt vật lý có thể chưa được xác minh đầy đủ trên mọi model; hãy tự kiểm tra với camera của bạn.
 
 ## Ghi nhận

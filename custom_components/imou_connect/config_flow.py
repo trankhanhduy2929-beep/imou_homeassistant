@@ -41,6 +41,8 @@ from .const import (
     CONF_LOCAL_CAMERAS,
     CONF_LOCAL_PASSWORD,
     CONF_LOCAL_USERNAME,
+    CONF_ONVIF_PORT,
+    CONF_ONVIF_PTZ,
     CONF_REMOVE_CAMERA,
     CONF_RTSP_PATH,
     CONF_RTSP_PORT,
@@ -60,6 +62,7 @@ from .const import (
     CONF_VALID_CODE,
     DEFAULT_MAX_CONCURRENT_REQUESTS,
     DEFAULT_MAX_PROPERTIES,
+    DEFAULT_ONVIF_PORT,
     DEFAULT_POLL_INTERVAL,
     DEFAULT_REQUEST_TIMEOUT,
     DOMAIN,
@@ -744,6 +747,8 @@ class ImouLifeOptionsFlow(config_entries.OptionsFlow):
             CONF_RTSP_PORT: previous.get(CONF_RTSP_PORT, 554),
             CONF_LOCAL_USERNAME: previous.get(CONF_LOCAL_USERNAME, ""),
             CONF_RTSP_PATH: previous.get(CONF_RTSP_PATH, self._choices[key][1]),
+            CONF_ONVIF_PORT: previous.get(CONF_ONVIF_PORT, DEFAULT_ONVIF_PORT),
+            CONF_ONVIF_PTZ: previous.get(CONF_ONVIF_PTZ, True),
         }
         if user_input is not None:
             defaults.update({field: user_input[field] for field in defaults if field in user_input})
@@ -756,6 +761,8 @@ class ImouLifeOptionsFlow(config_entries.OptionsFlow):
                     (CONF_RTSP_PORT, defaults.get(CONF_RTSP_PORT)),
                     (CONF_LOCAL_USERNAME, defaults.get(CONF_LOCAL_USERNAME)),
                     (CONF_RTSP_PATH, defaults.get(CONF_RTSP_PATH)),
+                    (CONF_ONVIF_PORT, defaults.get(CONF_ONVIF_PORT)),
+                    (CONF_ONVIF_PTZ, defaults.get(CONF_ONVIF_PTZ)),
                 ):
                     values.setdefault(field, default_value)
                 if not values.get(CONF_LOCAL_PASSWORD) and previous:
@@ -766,6 +773,7 @@ class ImouLifeOptionsFlow(config_entries.OptionsFlow):
                     fields = {
                         "invalid_host": CONF_LOCAL_HOST,
                         "invalid_port": CONF_RTSP_PORT,
+                        "invalid_onvif_port": CONF_ONVIF_PORT,
                         "invalid_path": CONF_RTSP_PATH,
                         "invalid_credentials": CONF_LOCAL_USERNAME,
                     }
@@ -803,6 +811,18 @@ class ImouLifeOptionsFlow(config_entries.OptionsFlow):
                 ): str,
                 vol.Optional(CONF_LOCAL_PASSWORD, default=""): _password_selector(),
                 vol.Required(CONF_RTSP_PATH, default=defaults[CONF_RTSP_PATH]): str,
+                vol.Optional(
+                    CONF_ONVIF_PORT,
+                    default=defaults[CONF_ONVIF_PORT],
+                ): vol.All(
+                    vol.Coerce(str),
+                    vol.Coerce(int),
+                    vol.Range(min=1, max=65535),
+                ),
+                vol.Optional(
+                    CONF_ONVIF_PTZ,
+                    default=defaults[CONF_ONVIF_PTZ],
+                ): bool,
                 vol.Optional(CONF_VALIDATE_STREAM, default=True): bool,
                 vol.Optional(CONF_REMOVE_CAMERA, default=False): bool,
             }),

@@ -70,6 +70,8 @@
           "local_username": "Tên đăng nhập nội bộ của camera",
           "local_password": "Mật khẩu nội bộ của camera",
           "rtsp_path": "Đường dẫn RTSP",
+          "onvif_port": "Cổng ONVIF (PTZ)",
+          "onvif_ptz": "Điều khiển PTZ qua ONVIF",
           "validate_stream": "Kiểm tra luồng RTSP trước khi lưu",
           "remove_camera": "Xóa cấu hình camera nội bộ"
         }
@@ -79,6 +81,7 @@
       "invalid_camera": "Chọn một camera trong danh sách.",
       "invalid_host": "Nhập địa chỉ IP hoặc tên máy chủ hợp lệ của camera, không kèm giao thức URL, cổng hoặc đường dẫn.",
       "invalid_port": "Nhập số cổng RTSP từ 1 đến 65535.",
+      "invalid_onvif_port": "Nhập số cổng ONVIF từ 1 đến 65535.",
       "invalid_path": "Nhập đường dẫn RTSP bắt đầu bằng một dấu /, không chứa khoảng trắng, dấu gạch chéo ngược hoặc phần fragment (#).",
       "invalid_credentials": "Nhập thông tin đăng nhập nội bộ của camera: tên đăng nhập tối đa 256 ký tự và mật khẩu tối đa 1024 ký tự. Phải có tên đăng nhập khi đặt mật khẩu.",
       "stream_unauthorized": "Camera từ chối tên đăng nhập hoặc mật khẩu nội bộ. Kiểm tra thông tin nội bộ của camera, không phải tài khoản Imou Life.",

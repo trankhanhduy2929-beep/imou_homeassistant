@@ -10,6 +10,14 @@ Custom integration này đăng nhập trực tiếp Imou Life bằng account/pas
 4. Nhập tài khoản và mật khẩu Imou Life.
 5. Nếu Imou yêu cầu CAPTCHA, mở liên kết xác minh do config flow hiển thị. Với mã `12112`, nhập mã SMS/email sáu số ở bước tiếp theo.
 
+**Nâng cấp lên `0.2.0`:** giải nén `imou_connect-custom-component-0.2.0.zip`, chép đè mã trong `/config/custom_components/imou_connect`, rồi restart Home Assistant; giữ nguyên config entry và cấu hình hiện có.
+
+Bản `0.2.0`:
+
+- **PTZ qua ONVIF LAN:** nút PTZ ưu tiên điều khiển camera qua ONVIF trên mạng LAN bằng IP/tài khoản local đã cấu hình cho RTSP (WSSE UsernameToken, `ContinuousMove` + `Stop`). Cloud PTZ của một số model bị Imou từ chối (`12100`/`13255`), nên ONVIF là đường chính.
+- **Configure thêm mục ONVIF:** `Cổng ONVIF (PTZ)` (mặc định 80, nhiều camera dùng 8000) và ô `Điều khiển PTZ qua ONVIF`. Camera không có dịch vụ PTZ ONVIF sẽ tự quay về route cloud.
+- Ánh xạ trục ONVIF: pan/tilt giữ dấu, zoom đảo dấu (`zoom_in` → ONVIF dương); mỗi lần bấm `ContinuousMove` với vận tốc hướng rồi `Stop` sau thời lượng.
+
 **Nâng cấp lên `0.1.26`:** giải nén `imou_connect-custom-component-0.1.26.zip`, chép đè mã trong `/config/custom_components/imou_connect`, rồi restart Home Assistant; giữ nguyên config entry và cấu hình hiện có.
 
 Bản `0.1.26`:
@@ -150,7 +158,7 @@ Bản `0.1.5` đã sửa trạng thái `validation pending` sau OTP bằng clien
 - Connectivity binary sensor cho device và từng channel.
 - Thing-model primitive property thành `sensor`, `binary_sensor`, `switch`, `number`, `select` hoặc `text`.
 - Thing-model service không có input thành `button`.
-- Nút PTZ (8 hướng và zoom vào/ra) cho thiết bị hỗ trợ PTZ, kèm service `imou_connect.ptz_move`.
+- Nút PTZ (8 hướng và zoom vào/ra) cho thiết bị hỗ trợ PTZ, điều khiển qua ONVIF LAN (ưu tiên) hoặc cloud, kèm service `imou_connect.ptz_move`.
 
 Property chứa tên nhạy cảm như password, token, secret, credential hoặc access key bị loại bỏ. Signed media URL không được lưu vào state hay log.
 

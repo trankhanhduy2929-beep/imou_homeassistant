@@ -5,12 +5,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from homeassistant.config_entries import ConfigEntryAuthFailed
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import (
@@ -24,12 +26,20 @@ from .api import (
     ImouTwoStepVerificationRequired,
 )
 from .const import (
+    CONF_LOCAL_HOST,
+    CONF_LOCAL_PASSWORD,
+    CONF_LOCAL_USERNAME,
+    CONF_ONVIF_PORT,
+    CONF_ONVIF_PTZ,
+    DEFAULT_ONVIF_PORT,
     DOMAIN,
     EVENT_REALTIME,
     REALTIME_HOLD_SECONDS,
     PTZ_NO_AUTHORITY_CODES,
     PTZ_STEP_DURATION_MS,
 )
+from .media import configured_local_cameras, local_camera_key
+from .onvif_ptz import OnvifPtzClient, OnvifPtzError
 from .models import (
     ImouDevice,
     ThingModel,
@@ -89,6 +99,7 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
         self._alarm_auth_generation: int | None = None
         self._ptz_rejected: set[str] = set()
         self._ptz_host_cache: dict[str, str] = {}
+        self._onvif_clients: dict[str, OnvifPtzClient] = {}
 
     async def _async_update_data(self) -> dict[str, ImouDevice]:
         """Fetch all devices, models, and exposed property values."""
@@ -578,31 +589,57 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
             raise UpdateFailed("Imou device is no longer available")
         if device_id in self._ptz_rejected:
             raise UpdateFailed("Imou PTZ control is not available for this device")
-        discovered = (
-            stream_entry_host(device.raw),
-            self._ptz_host_cache.get(device.device_id),
-        )
-        last_error: ImouApiError | None = None
-        for host in dict.fromkeys(item for item in discovered if item):
-            last_error = await self._async_try_ptz(
+        onvif = self._onvif_client(device_id, channel_id)
+        if onvif is not None and await onvif.async_supported():
+            try:
+                await onvif.async_move(
+                    pan=horizontal,
+                    tilt=vertical,
+                    zoom=-zoom,
+                    duration_ms=duration,
+                )
+            except OnvifPtzError as err:
+                raise UpdateFailed(
+                    f"Could not move Imou PTZ camera over ONVIF: {err}"
+                ) from err
+            return
+        discovered = [
+            item
+            for item in dict.fromkeys(
+                (
+                    stream_entry_host(device.raw),
+                    self._ptz_host_cache.get(device.device_id),
+                )
+            )
+            if item
+        ]
+        errors: list[ImouApiError] = []
+        for host in discovered:
+            error = await self._async_try_ptz(
                 device, channel_id, horizontal, vertical, zoom, duration, host
             )
-            if last_error is None:
+            if error is None:
                 self._ptz_host_cache[device.device_id] = host
                 return
+            errors.append(error)
         fetched = await self._async_fetch_ptz_host(device.device_id)
         if fetched and fetched not in discovered:
-            last_error = await self._async_try_ptz(
+            error = await self._async_try_ptz(
                 device, channel_id, horizontal, vertical, zoom, duration, fetched
             )
-            if last_error is None:
+            if error is None:
                 self._ptz_host_cache[device.device_id] = fetched
                 return
-        last_error = await self._async_try_ptz(
-            device, channel_id, horizontal, vertical, zoom, duration, None
-        )
-        if last_error is None:
-            return
+            errors.append(error)
+        if not errors:
+            # No device host was available at all; try the account entry once.
+            error = await self._async_try_ptz(
+                device, channel_id, horizontal, vertical, zoom, duration, None
+            )
+            if error is None:
+                return
+            errors.append(error)
+        last_error = errors[-1]
         if last_error.code in PTZ_NO_AUTHORITY_CODES or last_error.code in (401, 403):
             self._ptz_rejected.add(device_id)
             _LOGGER.debug(
@@ -647,6 +684,29 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
         except ImouApiError as err:
             _LOGGER.debug("Imou stream entry unavailable code=%s", err.code)
             return None
+
+    def _onvif_client(
+        self, device_id: str, channel_id: str
+    ) -> OnvifPtzClient | None:
+        """Return a cached ONVIF PTZ client when the channel is local."""
+        options = getattr(self.config_entry, "options", None)
+        if not isinstance(options, Mapping):
+            return None
+        key = local_camera_key(device_id, channel_id)
+        camera = configured_local_cameras(options).get(key)
+        if not camera or not camera.get(CONF_ONVIF_PTZ):
+            return None
+        client = self._onvif_clients.get(key)
+        if client is None:
+            client = OnvifPtzClient(
+                async_get_clientsession(self.hass),
+                camera[CONF_LOCAL_HOST],
+                int(camera.get(CONF_ONVIF_PORT, DEFAULT_ONVIF_PORT)),
+                camera[CONF_LOCAL_USERNAME],
+                camera[CONF_LOCAL_PASSWORD],
+            )
+            self._onvif_clients[key] = client
+        return client
 
     def ptz_available(self, device_id: str) -> bool:
         """Return whether PTZ control is still expected to work for a device."""

@@ -833,6 +833,16 @@ async def _read_bounded(content: Any, max_bytes: int) -> bytes:
     return bytes(buffer)
 
 
+def _safe_error_detail(value: Any) -> str:
+    """Return a short, single-line server message safe to log."""
+    if not isinstance(value, str):
+        return ""
+    text = " ".join(value.split())
+    if len(text) > 200:
+        text = f"{text[:200]}..."
+    return text
+
+
 @lru_cache(maxsize=1)
 def _load_device_ssl_context() -> ssl.SSLContext:
     """Build a TLS context that also trusts Imou's private CA chain."""
@@ -1956,7 +1966,7 @@ class ImouApiClient:
                 log_level,
                 "Imou API rejected request api=%s code=%s http_status=%s "
                 "revision=%s content_type=%s host=%s auth_type=%s "
-                "client_profile=%s",
+                "client_profile=%s detail=%s",
                 api_name,
                 numeric_code,
                 status,
@@ -1965,6 +1975,9 @@ class ImouApiClient:
                 urlparse(request_base_url).hostname or "unknown",
                 self._credential_type(signing_credentials),
                 "pc" if effective_client_ua == self._qr_client_ua else "phone",
+                _safe_error_detail(payload.get("desc"))
+                if api_name == PTZ_MOVE_API
+                else "",
             )
         result = payload.get("data")
         if numeric_code in CAPTCHA_CHALLENGE_CODES:

@@ -14,8 +14,11 @@ from .const import (
     CONF_LOCAL_HOST,
     CONF_LOCAL_PASSWORD,
     CONF_LOCAL_USERNAME,
+    CONF_ONVIF_PORT,
+    CONF_ONVIF_PTZ,
     CONF_RTSP_PATH,
     CONF_RTSP_PORT,
+    DEFAULT_ONVIF_PORT,
 )
 
 _STREAM_KEY_PRIORITY = (
@@ -167,12 +170,25 @@ def normalize_local_camera(value: Mapping[str, Any]) -> dict[str, Any]:
     parts = urlsplit(path)
     if parts.scheme or parts.netloc or parts.fragment:
         raise ValueError("invalid_path")
+    raw_onvif_port = value.get(CONF_ONVIF_PORT, DEFAULT_ONVIF_PORT)
+    if isinstance(raw_onvif_port, bool) or not re.fullmatch(
+        r"[0-9]{1,5}", str(raw_onvif_port)
+    ):
+        raise ValueError("invalid_onvif_port")
+    onvif_port = int(raw_onvif_port)
+    if not 1 <= onvif_port <= 65535:
+        raise ValueError("invalid_onvif_port")
+    onvif_ptz = value.get(CONF_ONVIF_PTZ, True)
+    if isinstance(onvif_ptz, str):
+        onvif_ptz = onvif_ptz.strip().casefold() in {"1", "true", "on", "yes"}
     return {
         CONF_LOCAL_HOST: host,
         CONF_RTSP_PORT: port,
         CONF_LOCAL_USERNAME: username,
         CONF_LOCAL_PASSWORD: password,
         CONF_RTSP_PATH: path,
+        CONF_ONVIF_PORT: onvif_port,
+        CONF_ONVIF_PTZ: bool(onvif_ptz),
     }
 
 

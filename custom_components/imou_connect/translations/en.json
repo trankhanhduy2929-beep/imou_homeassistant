@@ -70,6 +70,8 @@
           "local_username": "Local camera username",
           "local_password": "Local camera password",
           "rtsp_path": "RTSP path",
+          "onvif_port": "ONVIF port (PTZ)",
+          "onvif_ptz": "Control PTZ over ONVIF",
           "validate_stream": "Check the RTSP stream before saving",
           "remove_camera": "Remove local camera configuration"
         }
@@ -79,6 +81,7 @@
       "invalid_camera": "Select a camera from the list.",
       "invalid_host": "Enter a valid camera IP address or hostname without a URL scheme, port, or path.",
       "invalid_port": "Enter an RTSP port number from 1 to 65535.",
+      "invalid_onvif_port": "Enter an ONVIF port number from 1 to 65535.",
       "invalid_path": "Enter an RTSP path starting with a single /, without spaces, backslashes, or fragments (#).",
       "invalid_credentials": "Enter local camera credentials: up to 256 characters for the username and 1024 for the password. A username is required when a password is set.",
       "stream_unauthorized": "The camera rejected the local username or password. Check the local camera credentials, not the Imou Life account.",

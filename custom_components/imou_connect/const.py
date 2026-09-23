@@ -24,11 +24,14 @@ CONF_RTSP_PORT: Final = "rtsp_port"
 CONF_RTSP_PATH: Final = "rtsp_path"
 CONF_REMOVE_CAMERA: Final = "remove_camera"
 CONF_VALIDATE_STREAM: Final = "validate_stream"
+CONF_ONVIF_PORT: Final = "onvif_port"
+CONF_ONVIF_PTZ: Final = "onvif_ptz"
 
 DEFAULT_POLL_INTERVAL: Final = 30
 DEFAULT_REQUEST_TIMEOUT: Final = 15
 DEFAULT_MAX_CONCURRENT_REQUESTS: Final = 4
 DEFAULT_MAX_PROPERTIES: Final = 1000
+DEFAULT_ONVIF_PORT: Final = 80
 REALTIME_HOLD_SECONDS: Final = 30
 
 MIN_POLL_INTERVAL: Final = 15
