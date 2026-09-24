@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from math import isfinite
 from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
@@ -64,16 +65,14 @@ class ImouPropertySensor(ImouPropertyEntity, SensorEntity):
         value = self.property_value
         if value is None:
             return None
-        if self.property.data_type == "int":
+        if self.property.data_type in {"int", "float", "double"}:
             try:
-                return int(float(value))
-            except (TypeError, ValueError):
-                return value
-        if self.property.data_type in {"float", "double"}:
-            try:
-                return float(value)
-            except (TypeError, ValueError):
-                return value
+                numeric = float(value)
+                if not isfinite(numeric):
+                    return None
+                return int(numeric) if self.property.data_type == "int" else numeric
+            except (TypeError, ValueError, OverflowError):
+                return None
         if self.property.data_type == "enum":
             raw = str(value)
             return self.property.enum_labels.get(raw, raw)

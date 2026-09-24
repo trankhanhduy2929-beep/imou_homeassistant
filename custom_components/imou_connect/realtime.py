@@ -23,6 +23,7 @@ from .api import (
     ImouApiClient,
     ImouApiError,
     ImouAuthError,
+    ImouConnectionError,
     ImouMqttConfig,
     ImouMqttUnavailable,
     compact_json,
@@ -92,6 +93,10 @@ _NESTED_EVENT_KEYS = frozenset(
 
 class ImouMqttConnectionError(Exception):
     """The realtime broker connection failed."""
+
+
+class ImouMqttDeliveryError(ImouConnectionError):
+    pass
 
 
 @dataclass(slots=True, frozen=True)
@@ -812,7 +817,7 @@ def _load_tls_context() -> ssl.SSLContext:
             try:
                 context.load_verify_locations(cafile=str(certificate))
             except ssl.SSLError as err:
-                _LOGGER.warning("Could not load MQTT CA %s: %s", certificate.name, err)
+                _LOGGER.warning("Could not load MQTT CA: %s", type(err).__name__)
     return context
 
 
@@ -853,21 +858,31 @@ class ImouCloudMqttClient:
             raise ImouMqttUnavailable("Imou MQTT request transport is offline")
         sequence = self._next_request_seq
         self._next_request_seq = 1 if sequence >= 2_000_000_000 else sequence + 1
+        try:
+            request_params = dict(params)
+            try:
+                qos = int(request_params.get("qos", 1))
+            except (TypeError, ValueError):
+                qos = 1
+            for key in ("timeout", "host", "qos", "mqttHost", "keepAlive"):
+                request_params.pop(key, None)
+            request = {
+                "api": api_name,
+                "params": request_params,
+                "seq": sequence,
+            }
+            payload = compact_json(request)
+            timeout = max(5, min(int(timeout_ms), 60000)) / 1000
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            raise ImouMqttUnavailable(
+                f"Imou MQTT request preparation failed: {type(error).__name__}"
+            ) from None
         loop = asyncio.get_running_loop()
         future: asyncio.Future[tuple[int, int, Any, str]] = loop.create_future()
         self._pending_requests[sequence] = future
-        request_params = dict(params)
-        try:
-            qos = int(request_params.get("qos", 1))
-        except (TypeError, ValueError):
-            qos = 1
-        for key in ("timeout", "host", "qos", "mqttHost", "keepAlive"):
-            request_params.pop(key, None)
-        request = {
-            "api": api_name,
-            "params": request_params,
-            "seq": sequence,
-        }
+        publish_started = False
         try:
             async with self._publish_lock:
                 client = self._client
@@ -875,38 +890,41 @@ class ImouCloudMqttClient:
                     raise ImouMqttUnavailable(
                         "Imou MQTT request transport disconnected"
                     )
+                publish_started = True
                 await client.publish(
                     MQTT_REQUEST_TOPIC,
-                    compact_json(request),
+                    payload,
                     qos=max(0, min(qos, 2)),
-                    timeout=max(5, min(int(timeout_ms), 60000)) / 1000,
+                    timeout=timeout,
                 )
-            try:
-                response_sequence, code, data, description = await asyncio.wait_for(
-                    asyncio.shield(future),
-                    timeout=max(5, min(int(timeout_ms), 60000)) / 1000,
-                )
-            except TimeoutError as err:
-                raise ImouMqttUnavailable(
-                    f"Imou MQTT response timed out api={api_name}"
-                ) from err
-        except ImouApiError:
+            response_sequence, code, data, _description = await asyncio.wait_for(
+                asyncio.shield(future),
+                timeout=timeout,
+            )
+        except asyncio.CancelledError:
             raise
-        except Exception as err:
-            raise ImouMqttUnavailable(
-                f"Imou MQTT request failed api={api_name}: {err}"
-            ) from err
+        except ImouAuthError as error:
+            code = error.code if isinstance(error.code, int) else None
+            raise ImouAuthError(
+                f"Imou MQTT request authentication failed code={code}", code
+            ) from None
+        except Exception as error:
+            error_type = ImouMqttDeliveryError if publish_started else ImouMqttUnavailable
+            raise error_type(
+                f"Imou MQTT request failed: {type(error).__name__}"
+            ) from None
         finally:
             self._pending_requests.pop(sequence, None)
+            if not future.done():
+                future.cancel()
+            elif not future.cancelled():
+                future.exception()
         if response_sequence != sequence:
-            raise ImouMqttUnavailable("Imou MQTT response sequence mismatch")
+            raise ImouMqttDeliveryError("Imou MQTT response sequence mismatch")
         if code in {401, 403}:
-            raise ImouAuthError(description or "Imou MQTT authentication failed", code)
+            raise ImouAuthError(f"Imou MQTT authentication failed code={code}", code)
         if code not in SUCCESS_CODES:
-            raise ImouApiError(
-                description or f"Imou MQTT API error {code}",
-                code,
-            )
+            raise ImouApiError(f"Imou MQTT API error code={code}", code)
         if isinstance(data, Mapping):
             return dict(data)
         if data is None:
@@ -916,38 +934,35 @@ class ImouCloudMqttClient:
     async def run(self, stop: asyncio.Event) -> None:
         """Reconnect until stopped or the task is cancelled."""
         failures = 0
-        while not stop.is_set():
-            config = self.api.mqtt_config()
-            if config is None or not config.ssl_address:
-                await self._set_connected(False)
-                self.last_error = "Login did not provide a secure MQTT broker"
-                if await self._wait_or_stop(stop, 60):
+        try:
+            while not stop.is_set():
+                started = time.monotonic()
+                try:
+                    config = self.api.mqtt_config()
+                    if config is None or not config.ssl_address:
+                        await self._set_connected(False)
+                        self.last_error = "Login did not provide a secure MQTT broker"
+                        if await self._wait_or_stop(stop, 60):
+                            return
+                        continue
+                    await self._connect_once(config, stop)
+                    failures = 0
+                except asyncio.CancelledError:
+                    raise
+                except Exception as error:
+                    await self._set_connected(False)
+                    self.last_error = type(error).__name__
+                    connected_for = time.monotonic() - started
+                    failures = 1 if connected_for >= 60 else failures + 1
+                    _LOGGER.warning("Imou MQTT disconnected: %s", type(error).__name__)
+                delay = min(300, 5 * (2 ** min(max(failures - 1, 0), 6)))
+                if failures >= RECONNECT_COOLDOWN_AFTER_FAILURES:
+                    delay = 900
+                delay += secrets.randbelow(max(1, int(delay * 0.2) + 1))
+                if await self._wait_or_stop(stop, delay):
                     return
-                continue
-            started = time.monotonic()
-            try:
-                await self._connect_once(config, stop)
-                failures = 0
-            except asyncio.CancelledError:
-                raise
-            except (
-                ImouMqttConnectionError,
-                OSError,
-                TimeoutError,
-                ValueError,
-                ssl.SSLError,
-            ) as error:
-                await self._set_connected(False)
-                self.last_error = f"{type(error).__name__}: {error}"
-                connected_for = time.monotonic() - started
-                failures = 1 if connected_for >= 60 else failures + 1
-                _LOGGER.warning("Imou MQTT disconnected: %s", error)
-            delay = min(300, 5 * (2 ** min(max(failures - 1, 0), 6)))
-            if failures >= RECONNECT_COOLDOWN_AFTER_FAILURES:
-                delay = 900
-            delay += secrets.randbelow(max(1, int(delay * 0.2) + 1))
-            if await self._wait_or_stop(stop, delay):
-                return
+        finally:
+            await self._set_connected(False)
 
     async def _connect_once(self, config: ImouMqttConfig, stop: asyncio.Event) -> None:
         import aiomqtt
@@ -994,12 +1009,21 @@ class ImouCloudMqttClient:
                     if event is None:
                         continue
                     self.messages_received += 1
-                    await self.on_event(event)
+                    try:
+                        await self.on_event(event)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as error:
+                        _LOGGER.warning(
+                            "Imou MQTT event callback failed: %s", type(error).__name__
+                        )
+        except asyncio.CancelledError:
+            raise
         except aiomqtt.MqttError as error:
-            raise ImouMqttConnectionError(str(error)) from error
+            raise ImouMqttConnectionError(
+                f"Imou MQTT connection failed: {type(error).__name__}"
+            ) from None
         finally:
-            self._client = None
-            self._fail_pending_requests("Imou MQTT connection closed")
             await self._set_connected(False)
 
     async def _async_register_push(self, config: ImouMqttConfig) -> None:
@@ -1009,9 +1033,13 @@ class ImouCloudMqttClient:
             return
         try:
             await register(config.client_id, client_push_id=config.client_id)
-        except (ImouApiError, ValueError) as error:
-            self.last_error = f"push registration failed: {error}"
-            _LOGGER.warning("Imou MQTT push registration failed: %s", error)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            self.last_error = f"push registration failed: {type(error).__name__}"
+            _LOGGER.warning(
+                "Imou MQTT push registration failed: %s", type(error).__name__
+            )
 
     def _resolve_mqtt_response(self, payload: bytes) -> None:
         """Complete the matching request future from an MQTT response."""
@@ -1034,12 +1062,22 @@ class ImouCloudMqttClient:
                 future.set_exception(ImouMqttUnavailable(message))
 
     async def _set_connected(self, connected: bool) -> None:
+        if not connected:
+            self._client = None
+            self._fail_pending_requests("Imou MQTT connection closed")
         if self.connected == connected:
             return
         self.connected = connected
         if self.on_connection_state is None:
             return
-        await self.on_connection_state(connected)
+        try:
+            await self.on_connection_state(connected)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            _LOGGER.warning(
+                "Imou MQTT connection callback failed: %s", type(error).__name__
+            )
 
     @staticmethod
     async def _wait_or_stop(stop: asyncio.Event, delay: float) -> bool:

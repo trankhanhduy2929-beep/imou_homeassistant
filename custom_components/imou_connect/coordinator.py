@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
+from collections import OrderedDict
 from collections.abc import Mapping
+from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -62,6 +65,8 @@ from .realtime import (
 _LOGGER = logging.getLogger(__name__)
 _MODEL_TTL = 300
 _MODEL_RETRY_DELAY = 60
+_ALARM_IDENTITY_LIMIT = 2048
+_PROPERTY_PUSH_LIMIT = 2048
 
 
 class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
@@ -96,8 +101,13 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
         self._realtime_clear_tasks: dict[
             tuple[str, str, str], asyncio.Task[None]
         ] = {}
-        self._alarm_identities: set[str] = set()
+        self._alarm_identities: OrderedDict[str, None] = OrderedDict()
+        self._property_push_revision = 0
+        self._property_pushes: OrderedDict[
+            tuple[str, str, str | None, str, str], tuple[int, Any]
+        ] = OrderedDict()
         self._alarm_baseline_initialized = False
+        self._data_generation = 0
         self._alarm_auth_generation: int | None = None
         self._ptz_rejected: set[str] = set()
         self._ptz_host_cache: dict[str, str] = {}
@@ -105,6 +115,7 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
 
     async def _async_update_data(self) -> dict[str, ImouDevice]:
         """Fetch all devices, models, and exposed property values."""
+        push_revision = self._property_push_revision
         try:
             await self.api.async_authenticate()
             devices = await self.api.async_list_devices()
@@ -149,6 +160,20 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
                 "Latest Imou alarm polling unavailable code=%s",
                 err.code,
             )
+        for device_id, device in result.items():
+            deltas = {}
+            for prop in device.thing_model.properties:
+                if prop.sensitive:
+                    continue
+                pushed = self._property_pushes.get((
+                    device.device_id.casefold(), device.product_id,
+                    self._default_channel_id(device), prop.identifier, prop.ref,
+                ))
+                if pushed is not None and pushed[0] > push_revision:
+                    deltas[prop.identifier] = deepcopy(pushed[1])
+            if deltas:
+                result[device_id] = device.with_properties({**device.properties, **deltas})
+        self._data_generation += 1
         return result
 
     async def _async_enrich_device(
@@ -166,7 +191,19 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
 
         properties = model.exposed_properties(self.max_properties)
         readable_properties = tuple(prop for prop in properties if prop.readable)
-        values = previous.properties if previous is not None else {}
+        values = {}
+        if previous is not None and self._default_channel_id(previous) == self._default_channel_id(device):
+            previous_keys = {
+                (prop.identifier, prop.ref)
+                for prop in previous.thing_model.properties if not prop.sensitive
+            }
+            values = {
+                prop.identifier: previous.properties[prop.identifier]
+                for prop in model.properties
+                if not prop.sensitive
+                and (prop.identifier, prop.ref) in previous_keys
+                and prop.identifier in previous.properties
+            }
         if readable_properties:
             try:
                 raw_values = await self.api.async_get_properties(
@@ -233,6 +270,11 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
         """Return the latest device snapshot."""
         return self.data.get(device_id) if isinstance(self.data, dict) else None
 
+    def async_set_updated_data(self, data: dict[str, ImouDevice]) -> None:
+        """Install a full poll result and bump the readback generation."""
+        self._data_generation += 1
+        super().async_set_updated_data(data)
+
     def realtime_state(self, device_id: str, channel_id: str, kind: str) -> bool:
         """Return the latest bounded realtime state for one channel."""
         return self._realtime_states.get((device_id, channel_id, kind), False)
@@ -268,26 +310,60 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
             device_key, device = next(iter(data.items()))
         if device is None:
             return data, False
+        if not self._event_matches_product(event, device):
+            return data, False
+        channel_id = self._resolve_event_channel(device, event.channel_id)
+        normalized_channel = str(event.channel_id).strip()
+        if event.properties:
+            if normalized_channel in {"", "-1"}:
+                if len(device.channels) != 1:
+                    return data, False
+            elif normalized_channel not in {channel.channel_id for channel in device.channels}:
+                return data, False
+        normalized = {}
+        if (
+            channel_id == self._default_channel_id(device)
+            and str(event.product_id).strip() in {"", device.product_id}
+        ):
+            normalized = normalize_property_values(
+                (prop for prop in device.thing_model.properties if not prop.sensitive),
+                event.properties,
+            )
 
         updated_data = data
         data_changed = False
-        normalized = normalize_property_values(
-            device.thing_model.properties, event.properties
-        )
         if normalized:
-            device = device.with_properties({**device.properties, **normalized})
-            updated_data = dict(data)
-            updated_data[device_key or device.device_id] = device
-            data_changed = True
+            self._property_push_revision += 1
+            for prop in device.thing_model.properties:
+                if prop.sensitive or prop.identifier not in normalized:
+                    continue
+                key = (
+                    device.device_id.casefold(),
+                    device.product_id,
+                    channel_id,
+                    prop.identifier,
+                    prop.ref,
+                )
+                self._property_pushes[key] = (
+                    self._property_push_revision, deepcopy(normalized[prop.identifier])
+                )
+                self._property_pushes.move_to_end(key)
+            while len(self._property_pushes) > _PROPERTY_PUSH_LIMIT:
+                self._property_pushes.popitem(last=False)
+            merged = {**device.properties, **deepcopy(normalized)}
+            if merged != device.properties:
+                device = device.with_properties(merged)
+                updated_data = dict(data)
+                updated_data[device_key or device.device_id] = device
+                data_changed = True
 
-        event_data = event.event_data
+        event_data = self._sanitize_event_data(event.event_data, device.thing_model)
         event_data["resolved_device_id"] = device.device_id
         self.hass.bus.async_fire(EVENT_REALTIME, event_data)
 
-        channel_id = self._resolve_event_channel(device, event.channel_id)
         if channel_id is None:
             if notify and data_changed:
-                self.async_set_updated_data(updated_data)
+                self._async_publish_data(updated_data)
             return updated_data, data_changed
         event_key = (device.device_id, channel_id)
         event_metadata = {
@@ -320,10 +396,90 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
             )
         changed = data_changed or state_changed or event_changed
         if notify and data_changed:
-            self.async_set_updated_data(updated_data)
+            self._async_publish_data(updated_data)
         elif notify and changed:
             self.async_update_listeners()
         return updated_data, changed
+
+    def _async_publish_data(self, data: dict[str, ImouDevice]) -> None:
+        """Merge a partial push without resetting polling or success state."""
+        self.data = data
+        self.async_update_listeners()
+
+    @staticmethod
+    def _event_matches_product(
+        event: ImouRealtimeEvent, device: ImouDevice
+    ) -> bool:
+        """Ignore property pushes carrying another product's identity."""
+        product_id = str(event.product_id).strip()
+        if not product_id:
+            return True
+        normalized_channel = str(event.channel_id).strip()
+        for channel in device.channels:
+            if channel.channel_id != normalized_channel and (
+                normalized_channel not in {"", "-1"} or len(device.channels) != 1
+            ):
+                continue
+            channel_product = str(channel.product_id or "").strip()
+            if channel_product and product_id == channel_product:
+                return True
+        return product_id == device.product_id
+
+    @classmethod
+    def _sanitize_event_data(
+        cls, event_data: Mapping[str, Any], model: ThingModel
+    ) -> dict[str, Any]:
+        """Remove sensitive thing-model identifiers and refs recursively."""
+        return cls._sanitize_event_value(event_data, cls._sensitive_model_keys(model))
+
+    @staticmethod
+    def _sensitive_model_keys(model: ThingModel) -> set[str]:
+        keys = set()
+        for prop in model.properties:
+            if prop.sensitive:
+                keys.update(str(key).strip().casefold() for key in (prop.identifier, prop.ref))
+                try:
+                    keys.add(str(int(prop.ref)))
+                except ValueError:
+                    pass
+        return keys
+
+    @classmethod
+    def _sanitize_event_value(
+        cls,
+        value: Any,
+        sensitive_keys: set[str],
+        depth: int = 0,
+    ) -> Any:
+        """Redact sensitive keys, values, and ref/identifier pairs in payloads."""
+        if depth >= 8:
+            return "<redacted>"
+        if isinstance(value, Mapping):
+            result: dict[str, Any] = {}
+            sensitive_record = any(
+                str(key).strip().casefold() in {"ref", "identifier"}
+                and str(child).strip().casefold() in sensitive_keys
+                for key, child in value.items()
+            )
+            for index, (key, child) in enumerate(value.items()):
+                if index >= 100:
+                    break
+                key_text = str(key)
+                if sensitive_record or key_text.strip().casefold() in sensitive_keys:
+                    result[key_text] = "<redacted>"
+                else:
+                    result[key_text] = cls._sanitize_event_value(
+                        child, sensitive_keys, depth + 1
+                    )
+            return result
+        if isinstance(value, (list, tuple)):
+            return [
+                cls._sanitize_event_value(child, sensitive_keys, depth + 1)
+                for child in value[:16]
+            ]
+        if value is None or isinstance(value, (str, bool, int, float)):
+            return value
+        return "<redacted>"
 
     async def _async_poll_latest_alarms(
         self, data: dict[str, ImouDevice]
@@ -335,33 +491,32 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
             self._alarm_identities.clear()
             self._alarm_baseline_initialized = False
         alarms = await self.api.async_get_latest_alarms(list(data.values()))
-        current_identities = {
-            identity
-            for alarm in alarms
-            if (identity := alarm_identity(alarm))
-        }
         initial_poll = not self._alarm_baseline_initialized
-        if initial_poll:
-            self._alarm_baseline_initialized = True
+        self._alarm_baseline_initialized = True
 
+        previous_identities = frozenset(self._alarm_identities)
         updated_data = data
         for alarm in alarms:
             identity = alarm_identity(alarm)
             if not identity:
                 continue
-            if initial_poll:
-                if not self._alarm_is_recent(alarm):
-                    continue
-            elif identity in self._alarm_identities:
+            seen = identity in previous_identities or identity in self._alarm_identities
+            self._alarm_identities[identity] = None
+            self._alarm_identities.move_to_end(identity)
+            while len(self._alarm_identities) > _ALARM_IDENTITY_LIMIT:
+                self._alarm_identities.popitem(last=False)
+            if seen:
+                continue
+            timestamp = alarm.get("time")
+            if timestamp in (None, ""):
+                timestamp = alarm.get("timestamp")
+            if (initial_poll or timestamp not in (None, "")) and not self._alarm_is_recent(alarm):
                 continue
             updated_data, _ = await self._async_apply_realtime_event(
                 alarm_to_realtime_event(alarm),
                 updated_data,
                 notify=False,
             )
-        self._alarm_identities.update(current_identities)
-        if len(self._alarm_identities) > 2048:
-            self._alarm_identities = set(tuple(self._alarm_identities)[-1024:])
         return updated_data
 
     @staticmethod
@@ -422,21 +577,28 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
             else REALTIME_HOLD_SECONDS
         )
         freshness = max(REALTIME_HOLD_SECONDS, poll_seconds * 2)
-        return -5 <= time.time() - timestamp <= freshness
+        offset = getattr(self.api, "clock_offset", 0.0)
+        if not isinstance(offset, (int, float)) or not math.isfinite(offset):
+            offset = 0.0
+        return -5 <= time.time() + offset - timestamp <= freshness
 
     def _alarm_timestamp(self, value: Any) -> float | None:
-        """Parse epoch seconds/milliseconds and common Imou date strings."""
-        if value in (None, ""):
+        """Parse finite epoch seconds/milliseconds and common Imou date strings."""
+        if value in (None, "") or isinstance(value, bool):
             return None
-        text = str(value).strip()
         try:
-            numeric = float(text)
+            numeric = float(value)
+        except OverflowError:
+            return None
         except (TypeError, ValueError):
             numeric = None
         if numeric is not None:
+            if not math.isfinite(numeric):
+                return None
             while numeric > 100_000_000_000:
                 numeric /= 1000
             return numeric if numeric > 0 else None
+        text = str(value).strip()
         normalized = text.replace("Z", "+00:00")
         for candidate in (
             normalized,
@@ -458,7 +620,10 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
                     except ZoneInfoNotFoundError:
                         pass
                 parsed = parsed.replace(tzinfo=timezone)
-            return parsed.timestamp()
+            try:
+                return parsed.timestamp()
+            except (OverflowError, OSError, ValueError):
+                return None
         return None
 
     def _set_realtime_state(
@@ -520,6 +685,8 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
             or prop not in device.thing_model.exposed_properties(self.max_properties)
         ):
             raise UpdateFailed("Imou property is no longer writable")
+        push_revision = self._property_push_revision
+        data_generation = self._data_generation
         try:
             await self.api.async_set_properties(
                 device.product_id,
@@ -534,20 +701,25 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
             raise ConfigEntryAuthFailed from err
         except ImouApiError as err:
             raise UpdateFailed(f"Could not write Imou property: {err}") from err
-        await self.async_request_refresh()
         current = self.data if isinstance(self.data, dict) else {}
         refreshed = current.get(device.device_id)
         if (
             refreshed is not None
             and refreshed.product_id == device.product_id
+            and self._default_channel_id(refreshed) == self._default_channel_id(device)
             and prop in refreshed.thing_model.exposed_properties(self.max_properties)
             and refreshed.properties.get(prop.identifier) != value
+            and self._data_generation == data_generation
         ):
-            optimistic = dict(refreshed.properties)
-            optimistic[prop.identifier] = value
-            updated = dict(current)
-            updated[device.device_id] = refreshed.with_properties(optimistic)
-            self.async_set_updated_data(updated)
+            pushed = self._property_pushes.get((
+                device.device_id.casefold(), device.product_id,
+                self._default_channel_id(device), prop.identifier, prop.ref,
+            ))
+            if pushed is None or pushed[0] <= push_revision:
+                optimistic = {**refreshed.properties, prop.identifier: deepcopy(value)}
+                updated = {**current, device.device_id: refreshed.with_properties(optimistic)}
+                self._async_publish_data(updated)
+        await self.async_request_refresh()
 
     async def async_invoke_service(
         self,

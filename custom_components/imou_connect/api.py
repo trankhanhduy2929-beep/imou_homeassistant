@@ -7,6 +7,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import secrets
 import ssl
 import string
@@ -131,6 +132,22 @@ _IOT_CONTROL_APIS = {
     "SetProperties": "SetIotProperties",
     "SetService": "SetIotService",
 }
+_NON_REPLAYABLE_APIS = frozenset(
+    {
+        PTZ_MOVE_API,
+        "iot.control.SetProperties",
+        "iot.control.SetIotProperties",
+        "iot.control.SetService",
+        "iot.control.SetIotService",
+        "iot.smart.SetProperties",
+        "iot.smart.SetService",
+        "user.push.SetClientPushConfig",
+        "user.account.GrantingCredit",
+        "common.validcode.GetValidCode",
+        "common.validcode.CheckGeeTest4",
+        "common.validcode.CheckImageValidCode",
+    }
+)
 _LIVE_RESPONSE_KEYS = frozenset(
     {
         "flvurl",
@@ -205,10 +222,7 @@ class ImouCredentialError(ImouAuthError):
     """GetToken accepted the request but rejected account/password."""
 
     def __init__(self, fail_num: Any) -> None:
-        try:
-            failure_count = int(str(fail_num).strip())
-        except (TypeError, ValueError):
-            failure_count = None
+        failure_count = _response_code(fail_num)
         if failure_count is not None and failure_count < 0:
             failure_count = None
         self.failure_count = failure_count
@@ -833,6 +847,20 @@ async def _read_bounded(content: Any, max_bytes: int) -> bytes:
     return bytes(buffer)
 
 
+def _response_code(value: Any) -> int | None:
+    if isinstance(value, str):
+        if len(value) > 32 or not re.fullmatch(r"[+-]?[0-9]{1,10}", value.strip()):
+            return None
+        value = int(value)
+    if (
+        isinstance(value, int)
+        and not isinstance(value, bool)
+        and -(2**31) <= value < 2**31
+    ):
+        return value
+    return None
+
+
 def _safe_error_detail(value: Any) -> str:
     """Return a short, single-line server message safe to log."""
     if not isinstance(value, str):
@@ -917,9 +945,13 @@ class ImouApiClient:
         value = value.strip().rstrip("/")
         if not value.startswith(("http://", "https://")):
             value = f"https://{value}"
-        parsed = urlparse(value)
-        if not parsed.hostname:
-            raise ImouConnectionError(f"Invalid Imou entry URL: {value}")
+        try:
+            parsed = urlparse(value)
+            valid = bool(parsed.hostname)
+        except ValueError:
+            valid = False
+        if not valid:
+            raise ImouConnectionError("Invalid Imou entry URL") from None
         return value
 
     @property
@@ -931,6 +963,11 @@ class ImouApiClient:
     def auth_generation(self) -> int:
         """Return a counter that changes after every successful login."""
         return self._auth_generation
+
+    @property
+    def clock_offset(self) -> float:
+        """Return the last measured Imou server clock offset in seconds."""
+        return self._clock_offset
 
     def mqtt_config(self) -> ImouMqttConfig | None:
         """Return the recovered main MQTT configuration when Login supplied it."""
@@ -1274,12 +1311,17 @@ class ImouApiClient:
         self,
         *,
         force: bool = False,
+        expected_generation: int | None = None,
         expected_qr_required: bool = False,
         use_pc_client: bool | None = None,
     ) -> None:
         """Perform GetToken then Login, serializing concurrent relogins."""
         async with self._login_lock:
-            if self.authenticated and not force:
+            if self.authenticated and (
+                not force
+                or expected_generation is not None
+                and expected_generation != self._auth_generation
+            ):
                 return
             selected_pc_client = (
                 self._using_pc_client if use_pc_client is None else use_pc_client
@@ -1435,7 +1477,9 @@ class ImouApiClient:
             _LOGGER.info(
                 "Imou QR recovery host selected host=%s status=%s",
                 urlparse(query_base_url).hostname or "unknown",
-                qr_result.status,
+                qr_result.status
+                if qr_result.status in {"login", "expire", "cancel", "waiting", "unscan", "scan"}
+                else "<redacted>",
             )
         regional_attempted = False
         regional_error_code: int | None = None
@@ -1456,6 +1500,8 @@ class ImouApiClient:
                         capture_response_auth=True,
                     )
                 except ImouApiError as error:
+                    if error.code == 429:
+                        raise
                     regional_error_code = error.code
                     _LOGGER.debug(
                         "Imou regional QR query rejected code=%s host=%s",
@@ -1522,6 +1568,8 @@ class ImouApiClient:
             try:
                 result = await self._query_qr_payload(login_code, base_url)
             except ImouApiError as error:
+                if error.code == 429:
+                    raise
                 if error.code == 11001:
                     continue
                 _LOGGER.debug(
@@ -1703,32 +1751,60 @@ class ImouApiClient:
 
     @staticmethod
     def _safe_mapping_keys(value: Mapping[str, Any]) -> str:
-        return ",".join(sorted(str(key)[:64] for key in value)[:32])
+        allowed = {
+            "status", "username", "userName", "token", "accessToken", "userToken",
+            "sessionId", "sessionID", "sessionid", "entryUrlV2", "entryUrl",
+            "supportPcAutoLogin", "creditTerminal", "isSingleCredit", "data",
+            "captchaMode", "captchaData", "captchaId", "captchaServer",
+            "verifyToken", "captchaMetaData", "_responseHeaderNames",
+            "_responseAuthSources",
+        }
+        names = sorted(key for key in value if key in allowed)
+        if len(names) != len(value):
+            names.append("<redacted>")
+        return ",".join(names)
 
     @staticmethod
     def _safe_response_metadata(value: Mapping[str, Any], key: str) -> str:
         metadata = value.get(key)
         if not isinstance(metadata, (list, tuple)):
             return "none"
-        names = sorted({str(item).strip().casefold()[:64] for item in metadata if item})
-        return ",".join(names[:32]) or "none"
+        fields = {
+            "x-pcs-token", "x-token", "token", "x-pcs-session-id", "x-session-id",
+            "session-id", "x-pcs-entry-url-v2", "x-entry-url-v2", "entry-url-v2",
+            "x-pcs-username", "x-username", "username",
+        }
+        allowed = (
+            fields | {"content-type", "content-length", "date", "x-pcs-date", "server"}
+            if key == "_responseHeaderNames"
+            else {f"header:{name}" for name in fields}
+            | {
+                f"cookie:{name}" for name in (
+                    "token", "accesstoken", "access_token", "sessionid",
+                    "session_id", "username", "entryurlv2",
+                )
+            }
+        )
+        names = set()
+        for item in metadata:
+            if isinstance(item, str) and item.casefold() in allowed:
+                names.add(item.casefold())
+            else:
+                names.add("<redacted>")
+        return ",".join(sorted(names)) or "none"
 
     @staticmethod
     def _safe_boolean_flags(value: Any) -> str:
         if not isinstance(value, Mapping):
             return "none"
         flags = []
-        for key, item in value.items():
+        for key in ("creditTerminal", "isSingleCredit", "supportPcAutoLogin"):
+            item = value.get(key)
             if isinstance(item, bool):
-                flags.append(f"{str(key)[:64]}={str(item).lower()}")
+                flags.append(f"{key}={str(item).lower()}")
             elif isinstance(item, int) and item in {0, 1}:
-                normalized_key = str(key).casefold()
-                if any(
-                    marker in normalized_key
-                    for marker in ("credit", "terminal", "verify", "single")
-                ):
-                    flags.append(f"{str(key)[:64]}={item}")
-        return ",".join(sorted(flags)[:32]) or "none"
+                flags.append(f"{key}={item}")
+        return ",".join(flags) or "none"
 
     async def async_request(
         self, api_name: str, revision: str, data: Mapping[str, Any]
@@ -1744,8 +1820,7 @@ class ImouApiClient:
         except ImouQrLoginRequired:
             raise
         except ImouAuthError:
-            if generation == self._auth_generation:
-                await self.async_authenticate(force=True)
+            await self.async_authenticate(force=True, expected_generation=generation)
             return await self._request_with_retries(api_name, revision, data)
 
     async def _request_with_retries(
@@ -1763,7 +1838,8 @@ class ImouApiClient:
         ssl_context: ssl.SSLContext | None = None,
     ) -> dict[str, Any]:
         last_error: ImouConnectionError | None = None
-        for attempt in range(3):
+        attempts = 1 if api_name in _NON_REPLAYABLE_APIS else 3
+        for attempt in range(attempts):
             try:
                 return await self._request_once(
                     api_name,
@@ -1779,7 +1855,7 @@ class ImouApiClient:
                 )
             except ImouConnectionError as err:
                 last_error = err
-                if attempt == 2:
+                if attempt + 1 == attempts:
                     break
                 await asyncio.sleep(0.5 * (2**attempt))
         raise last_error or ImouConnectionError("Imou request failed")
@@ -1802,6 +1878,23 @@ class ImouApiClient:
         if signing_credentials is None:
             raise ImouAuthError("No signing credentials")
         request_base_url = base_url or self._base_url
+        try:
+            destination = urlparse(request_base_url)
+            secure_destination = (
+                destination.scheme == "https"
+                and bool(destination.hostname)
+                and not any(character.isspace() for character in request_base_url)
+                and destination.port != 0
+                and destination.username is None
+                and not destination.query
+                and not destination.fragment
+            )
+        except ValueError:
+            secure_destination = False
+        if not secure_destination:
+            raise ImouApiError(
+                "Signed Imou requests require a valid HTTPS destination"
+            ) from None
         if (
             api_name == _LEGACY_DEVICE_LIST_API
             and time.monotonic()
@@ -1881,12 +1974,41 @@ class ImouApiClient:
                     data=body,
                     headers=headers,
                     timeout=self.request_timeout,
+                    allow_redirects=False,
                     **({"ssl": ssl_context} if ssl_context is not None else {}),
                 ) as response,
             ):
-                raw = await _read_bounded(response.content, MAX_API_RESPONSE_BYTES)
+                received_at = time.time()
                 status = response.status
+                if (
+                    not isinstance(status, int)
+                    or isinstance(status, bool)
+                    or not 200 <= status <= 599
+                ):
+                    raise ImouConnectionError("Invalid Imou cloud HTTP status")
                 server_date = response.headers.get("x-pcs-date")
+                if isinstance(server_date, str):
+                    try:
+                        server_time = datetime.strptime(
+                            server_date, "%Y-%m-%dT%H:%M:%SZ"
+                        ).replace(tzinfo=UTC)
+                        offset = server_time.timestamp() - received_at
+                        if abs(offset) < 86400:
+                            self._clock_offset = offset
+                    except (ValueError, OverflowError, OSError):
+                        pass
+                if 300 <= status < 400:
+                    raise ImouApiError("Imou cloud redirect rejected", status)
+                if status == 429:
+                    raise ImouApiError("Imou cloud rate limit exceeded", status)
+                if status == 408:
+                    raise ImouApiError("Imou cloud HTTP 408", status)
+                try:
+                    raw = await _read_bounded(response.content, MAX_API_RESPONSE_BYTES)
+                except Exception:
+                    if status in {401, 403}:
+                        raise ImouAuthError("Authentication failed", status) from None
+                    raise
                 response_header_names = (
                     tuple(str(name).casefold() for name in response.headers)
                     if capture_response_auth
@@ -1897,50 +2019,29 @@ class ImouApiClient:
                     if capture_response_auth
                     else ({}, ())
                 )
-        except (asyncio.TimeoutError, OSError) as err:
-            raise ImouConnectionError(f"Request to {api_name} failed: {err}") from err
-        except Exception as err:
-            raise ImouConnectionError(f"Request to {api_name} failed: {err}") from err
+        except ImouApiError:
+            raise
+        except Exception:
+            raise ImouConnectionError("Request to Imou cloud failed") from None
+        if status >= 500:
+            raise ImouConnectionError(f"Imou cloud HTTP {status}", status)
         if len(raw) > MAX_API_RESPONSE_BYTES:
-            raise ImouConnectionError(f"Response from {api_name} exceeded size limit")
-        if server_date:
-            try:
-                server_time = datetime.strptime(
-                    server_date, "%Y-%m-%dT%H:%M:%SZ"
-                ).replace(tzinfo=UTC)
-                offset = server_time.timestamp() - time.time()
-                if abs(offset) < 86400:
-                    self._clock_offset = offset
-            except ValueError:
-                pass
+            if status in {401, 403}:
+                raise ImouAuthError("Authentication failed", status)
+            raise ImouConnectionError("Imou cloud response exceeded size limit")
         legacy_unavailable = (
             status == 404 and api_name == _LEGACY_DEVICE_LIST_API
         )
-        if legacy_unavailable:
-            try:
-                payload = json.loads(raw)
-            except (UnicodeDecodeError, json.JSONDecodeError):
-                payload = None
-        else:
-            try:
-                payload = json.loads(raw)
-            except (UnicodeDecodeError, json.JSONDecodeError) as err:
-                raise ImouConnectionError(
-                    f"Invalid response from {api_name} (HTTP {status})"
-                ) from err
-        if payload is None:
-            if legacy_first_page:
-                raise self._mark_legacy_discovery_unavailable(request_base_url) from None
-            raise _ImouLegacyEndpointUnavailable(
-                "Imou legacy device list endpoint unavailable", 404
-            ) from None
-        code = payload.get("code")
         try:
-            numeric_code = int(code)
-        except (TypeError, ValueError):
-            numeric_code = status
+            payload = json.loads(raw)
+        except (UnicodeDecodeError, ValueError, RecursionError):
+            payload = None
+        if not isinstance(payload, Mapping):
+            payload = {}
+        numeric_code = _response_code(payload.get("code"))
         if (
-            numeric_code not in SUCCESS_CODES
+            numeric_code is not None
+            and numeric_code not in SUCCESS_CODES
             and numeric_code not in expected_error_codes
         ):
             is_property_rejection = numeric_code == 10003 and api_name in {
@@ -1978,9 +2079,11 @@ class ImouApiClient:
                 else "",
             )
         result = payload.get("data")
+        if 200 <= status < 300 and numeric_code == 429:
+            raise ImouApiError("Imou cloud rate limit exceeded", numeric_code)
         if numeric_code in CAPTCHA_CHALLENGE_CODES:
             raise ImouCaptchaRequired(
-                str(payload.get("desc") or "Visual verification required"),
+                "Visual verification required",
                 numeric_code,
                 self._captcha_challenge_from_data(
                     result,
@@ -2003,12 +2106,18 @@ class ImouApiClient:
                 self._safe_boolean_flags(result),
             )
             raise ImouTwoStepVerificationRequired(
-                str(payload.get("desc") or "Two-step verification required"),
-                numeric_code,
+                "Two-step verification required", numeric_code
             )
-        if status in {401, 403} or self._looks_like_auth_error(numeric_code, payload):
+        if status in {401, 403} or (
+            numeric_code is not None
+            and numeric_code not in SUCCESS_CODES
+            and self._looks_like_auth_error(numeric_code, payload)
+        ):
             raise ImouAuthError(
-                str(payload.get("desc") or "Authentication failed"), numeric_code
+                "Authentication failed",
+                numeric_code
+                if numeric_code is not None and numeric_code not in SUCCESS_CODES
+                else status,
             )
         if legacy_unavailable:
             if legacy_first_page:
@@ -2016,12 +2125,16 @@ class ImouApiClient:
             raise _ImouLegacyEndpointUnavailable(
                 "Imou legacy device list endpoint unavailable", 404
             )
-        if status >= 500:
-            raise ImouConnectionError(f"Imou cloud HTTP {status}")
+        if not 200 <= status < 300:
+            raise ImouApiError(f"Imou cloud HTTP {status}", status)
+        if numeric_code is None:
+            raise ImouConnectionError(
+                f"Invalid response from Imou cloud (HTTP {status})"
+            ) from None
         if numeric_code not in SUCCESS_CODES:
-            raise ImouApiError(
-                str(payload.get("desc") or f"API error {numeric_code}"), numeric_code
-            )
+            raise ImouApiError(f"API error {numeric_code}", numeric_code)
+        if result is not None and not isinstance(result, Mapping):
+            raise ImouConnectionError("Invalid Imou cloud response data")
         response_data = dict(result) if isinstance(result, Mapping) else {}
         if capture_response_auth:
             for key, value in response_auth.items():
@@ -2106,7 +2219,10 @@ class ImouApiClient:
     def _looks_like_auth_error(code: int, payload: Mapping[str, Any]) -> bool:
         if code in AUTH_ERROR_CODES:
             return True
-        description = str(payload.get("desc") or "").lower()
+        description = payload.get("desc")
+        if not isinstance(description, str):
+            return False
+        description = description.lower()
         return any(
             word in description
             for word in ("token expired", "session expired", "unauthorized")
@@ -2130,6 +2246,8 @@ class ImouApiClient:
             except _ImouLegacyEndpointUnavailable:
                 continue
             except ImouApiError as err:
+                if err.code == 429:
+                    raise
                 last_error = err
                 continue
             last_error = None
@@ -2246,6 +2364,8 @@ class ImouApiClient:
         except ImouAuthError:
             raise
         except ImouApiError as err:
+            if err.code == 429:
+                raise
             self._latest_alarm_status = f"mix_error:{err.code}"
             _LOGGER.debug(
                 "Imou latest mixed alarm fallback code=%s",
@@ -2340,6 +2460,8 @@ class ImouApiClient:
         except ImouAuthError:
             raise
         except ImouApiError as err:
+            if err.code == 429:
+                raise
             _LOGGER.debug("Imou family enumeration unavailable code=%s", err.code)
             self._family_cache_expires = time.monotonic() + 60
             return self._family_ids
@@ -2382,6 +2504,8 @@ class ImouApiClient:
             except ImouAuthError:
                 raise
             except ImouApiError as err:
+                if err.code == 429:
+                    raise
                 last_error = err
                 _LOGGER.debug("Imou device family unavailable code=%s", err.code)
         if not devices and last_error is not None:
@@ -2410,7 +2534,9 @@ class ImouApiClient:
                 data = await self.async_request(api, revision, {**payload, **pagination})
             except ImouAuthError:
                 raise
-            except ImouApiError:
+            except ImouApiError as err:
+                if err.code == 429:
+                    raise
                 if devices:
                     break
                 raise
@@ -2600,6 +2726,11 @@ class ImouApiClient:
                 except ImouAuthError:
                     raise
                 except ImouApiError as err:
+                    if err.code == 429 or (
+                        operation != "GetProperties"
+                        and isinstance(err, ImouConnectionError)
+                    ):
+                        raise
                     last_error = err
                     if transport == "mqtt":
                         if (
@@ -2658,6 +2789,8 @@ class ImouApiClient:
         except ImouAuthError:
             raise
         except ImouApiError as err:
+            if operation != "GetProperties" and isinstance(err, ImouConnectionError):
+                raise
             if (
                 not self._group_control_enabled(group_control_flag)
                 and channel_id not in (None, "")
@@ -2728,7 +2861,7 @@ class ImouApiClient:
             except ImouAuthError:
                 raise
             except ImouApiError as err:
-                if not fallback_identifiers:
+                if not fallback_identifiers or err.code == 429:
                     raise
                 primary_error = err
                 values = {}
@@ -2742,6 +2875,8 @@ class ImouApiClient:
                     and (identifier := str(fallback_identifiers.get(ref) or ""))
                     and identifier not in values
                 ]
+                if not missing and primary_error is not None:
+                    raise primary_error
                 if missing:
                     identifiers = [
                         str(fallback_identifiers[ref]) for ref in missing
@@ -2761,6 +2896,8 @@ class ImouApiClient:
                     except ImouAuthError:
                         raise
                     except ImouApiError as fallback_error:
+                        if fallback_error.code == 429:
+                            raise
                         if not values:
                             if primary_error is not None:
                                 raise fallback_error from primary_error
@@ -2805,10 +2942,14 @@ class ImouApiClient:
                 channel_id=channel_id,
                 fallback_codes=PROPERTY_CONTROL_FALLBACK_CODES,
             )
-        except ImouAuthError:
+        except (ImouAuthError, ImouConnectionError):
             raise
         except ImouApiError as err:
-            if not fallback_identifiers:
+            if (
+                not fallback_identifiers
+                or err.code is None
+                or 300 <= err.code < 600
+            ):
                 raise
             _LOGGER.debug(
                 "Retrying Imou property write by identifiers code=%s",
@@ -3030,6 +3171,8 @@ class ImouApiClient:
             except ImouAuthError:
                 raise
             except ImouApiError as err:
+                if err.code == 429:
+                    raise
                 last_error = err
                 _LOGGER.debug(
                     "Imou standard live URL unavailable stream_type=%s code=%s",
@@ -3087,6 +3230,8 @@ class ImouApiClient:
             except ImouAuthError:
                 raise
             except ImouApiError as err:
+                if err.code == 429:
+                    raise
                 last_error = err
                 _LOGGER.debug(
                     "Imou live URL fallback mode=%s api=%s code=%s",
@@ -3130,6 +3275,8 @@ class ImouApiClient:
             except ImouAuthError:
                 raise
             except ImouApiError as err:
+                if err.code == 429 or isinstance(err, ImouConnectionError):
+                    raise
                 last_error = err
                 _LOGGER.debug(
                     "Imou live service fallback mode=%s code=%s",
@@ -3181,10 +3328,8 @@ class ImouApiClient:
                 data = await _read_bounded(response.content, max_bytes)
         except ImouConnectionError:
             raise
-        except (asyncio.TimeoutError, OSError) as err:
-            raise ImouConnectionError(f"Snapshot request failed: {err}") from err
-        except Exception as err:
-            raise ImouConnectionError(f"Snapshot request failed: {err}") from err
+        except Exception:
+            raise ImouConnectionError("Snapshot request failed") from None
         if len(data) > max_bytes:
             raise ImouConnectionError("Snapshot exceeded size limit")
         return data

@@ -174,6 +174,7 @@ def async_setup_dynamic_entities(
                 device.product_id,
                 device.name,
                 device.model,
+                device.supports_ptz,
                 coordinator.max_properties,
                 tuple(
                     (channel.channel_id, channel.name, channel.product_id)

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import secrets
 import time
 from base64 import b64decode
 from binascii import Error as BinasciiError
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from http import HTTPStatus
 from pathlib import Path
@@ -28,6 +29,8 @@ from .const import (
     DATA_CAPTCHA_VIEWS_REGISTERED,
     DOMAIN,
 )
+
+_MAX_CAPTCHA_SESSIONS = 128
 
 _NO_STORE_HEADERS = {
     "Cache-Control": "no-store, max-age=0",
@@ -51,14 +54,23 @@ class CaptchaSession:
     status: str = "required"
     message: str = "Hoàn tất CAPTCHA để tiếp tục."
     complete: bool = False
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False, compare=False)
 
 
 def _domain_data(hass: HomeAssistant) -> dict[str, Any]:
     return hass.data.setdefault(DOMAIN, {})
 
 
-def _sessions(hass: HomeAssistant) -> dict[str, CaptchaSession]:
-    return _domain_data(hass).setdefault(DATA_CAPTCHA_SESSIONS, {})
+def _sessions(
+    hass: HomeAssistant, *, prune_expired: bool = False
+) -> dict[str, CaptchaSession]:
+    sessions = _domain_data(hass).setdefault(DATA_CAPTCHA_SESSIONS, {})
+    if prune_expired:
+        now = time.monotonic()
+        for token, session in tuple(sessions.items()):
+            if now - session.created_at > CAPTCHA_SESSION_TTL:
+                sessions.pop(token, None)
+    return sessions
 
 
 @callback
@@ -73,8 +85,16 @@ def async_set_captcha_session(
     web_token: str | None = None,
 ) -> CaptchaSession:
     """Create or replace the browser-visible state for one flow."""
-    token = web_token or secrets.token_urlsafe(32)
-    sessions = _sessions(hass)
+    sessions = _sessions(hass, prune_expired=True)
+    previous = next(
+        (session for session in sessions.values() if session.flow_id == flow_id),
+        None,
+    )
+    token = web_token or (previous.web_token if previous else secrets.token_urlsafe(32))
+    if previous is None:
+        while len(sessions) >= _MAX_CAPTCHA_SESSIONS:
+            oldest = min(sessions, key=lambda item: sessions[item].created_at)
+            sessions.pop(oldest, None)
     for existing_token, existing in tuple(sessions.items()):
         if existing.flow_id == flow_id and existing_token != token:
             sessions.pop(existing_token, None)
@@ -86,6 +106,7 @@ def async_set_captcha_session(
         fingerprint=fingerprint,
         first_seen=first_seen,
         created_at=time.monotonic(),
+        lock=previous.lock if previous else asyncio.Lock(),
         message=(
             "Nhập bốn ký tự trong ảnh CAPTCHA."
             if challenge.is_image
@@ -106,7 +127,7 @@ def async_update_captcha_session(
     complete: bool = False,
 ) -> None:
     """Update only UI-safe CAPTCHA status fields."""
-    for session in _sessions(hass).values():
+    for session in _sessions(hass, prune_expired=True).values():
         if session.flow_id == flow_id:
             session.status = status
             session.message = message
@@ -131,13 +152,13 @@ def async_register_captcha_views(hass: HomeAssistant) -> None:
     data = _domain_data(hass)
     if data.get(DATA_CAPTCHA_VIEWS_REGISTERED):
         return
-    data[DATA_CAPTCHA_VIEWS_REGISTERED] = True
     hass.http.register_view(ImouCaptchaPageView)
     hass.http.register_view(ImouCaptchaStatusView)
     hass.http.register_view(ImouCaptchaScriptView)
     hass.http.register_view(ImouCaptchaImageView)
     hass.http.register_view(ImouCaptchaSubmitView)
     hass.http.register_view(ImouCaptchaRefreshView)
+    data[DATA_CAPTCHA_VIEWS_REGISTERED] = True
 
 
 def _get_session(request: web.Request) -> tuple[str, CaptchaSession]:
@@ -242,7 +263,7 @@ class ImouCaptchaScriptView(_TokenProtectedCaptchaView):
         """Return the local GeeTest script."""
         _get_session(request)
         return web.Response(
-            text=_captcha_script(),
+            text=await asyncio.to_thread(_captcha_script),
             content_type="application/javascript",
             headers=_NO_STORE_HEADERS,
         )
@@ -285,9 +306,20 @@ class _CaptchaPostView(_TokenProtectedCaptchaView):
                 max_size=CAPTCHA_SUBMIT_MAX_BYTES,
                 actual_size=request.content_length,
             )
+        body = bytearray()
+        while True:
+            chunk = await request.content.read(CAPTCHA_SUBMIT_MAX_BYTES + 1 - len(body))
+            if not chunk:
+                break
+            body.extend(chunk)
+            if len(body) > CAPTCHA_SUBMIT_MAX_BYTES:
+                raise web.HTTPRequestEntityTooLarge(
+                    max_size=CAPTCHA_SUBMIT_MAX_BYTES,
+                    actual_size=len(body),
+                )
         try:
-            payload = await request.json(loads=json.loads)
-        except (json.JSONDecodeError, UnicodeDecodeError) as err:
+            payload = json.loads(body.decode("utf-8"))
+        except (ValueError, RecursionError) as err:
             raise web.HTTPBadRequest(text="Invalid JSON") from err
         if not isinstance(payload, dict):
             raise web.HTTPBadRequest(text="Invalid request")
@@ -305,30 +337,43 @@ class _CaptchaPostView(_TokenProtectedCaptchaView):
         session = _sessions(hass).get(web_token)
         if session is None:
             raise web.HTTPGone(text="CAPTCHA session expired")
-        try:
-            await hass.config_entries.flow.async_configure(
-                session.flow_id, user_input
+        async with session.lock:
+            _, current = _get_session(request)
+            if current.lock is not session.lock:
+                raise web.HTTPConflict(text="CAPTCHA session changed")
+            session = current
+            if (
+                user_input.get("action") == "submit"
+                and user_input.get("generation") != session.generation
+            ):
+                raise web.HTTPConflict(text="CAPTCHA generation changed")
+            if not session.complete:
+                try:
+                    await hass.config_entries.flow.async_configure(
+                        session.flow_id, user_input
+                    )
+                except UnknownFlow as err:
+                    raise web.HTTPGone(
+                        text="Configuration flow is no longer active"
+                    ) from err
+                session = _sessions(hass).get(web_token)
+                if session is None:
+                    return self.json(
+                        {"ok": True, "message": "Đã xác minh. Quay lại Home Assistant."},
+                        headers=_NO_STORE_HEADERS,
+                    )
+            ok = session.status in {"accepted", "complete", "otp_required"} or (
+                allow_required and session.status == "required"
             )
-        except UnknownFlow as err:
-            raise web.HTTPGone(text="Configuration flow is no longer active") from err
-        session = _sessions(hass).get(web_token)
-        if session is None:
             return self.json(
-                {"ok": True, "message": "Đã xác minh. Quay lại Home Assistant."},
+                {
+                    "ok": ok,
+                    "generation": session.generation,
+                    "message" if ok else "error": session.message,
+                },
+                status_code=HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST,
                 headers=_NO_STORE_HEADERS,
             )
-        ok = session.status in {"accepted", "complete", "otp_required"} or (
-            allow_required and session.status == "required"
-        )
-        return self.json(
-            {
-                "ok": ok,
-                "generation": session.generation,
-                "message" if ok else "error": session.message,
-            },
-            status_code=HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST,
-            headers=_NO_STORE_HEADERS,
-        )
 
 
 class ImouCaptchaSubmitView(_CaptchaPostView):
@@ -341,14 +386,17 @@ class ImouCaptchaSubmitView(_CaptchaPostView):
         self, request: web.Request, web_token: str = ""
     ) -> web.Response:
         """Continue the external config-flow step."""
-        web_token, session = _get_session(request)
+        web_token, _ = _get_session(request)
         payload = await self._read_json(request)
         try:
-            generation = int(payload.pop("generation"))
-        except (KeyError, TypeError, ValueError) as err:
+            value = payload.pop("generation")
+            if isinstance(value, bool) or (
+                isinstance(value, float) and not value.is_integer()
+            ):
+                raise ValueError("Invalid CAPTCHA generation")
+            generation = int(value)
+        except (KeyError, TypeError, ValueError, OverflowError) as err:
             raise web.HTTPBadRequest(text="Invalid CAPTCHA generation") from err
-        if generation != session.generation:
-            raise web.HTTPConflict(text="CAPTCHA generation changed")
         return await self._configure(
             request,
             web_token,

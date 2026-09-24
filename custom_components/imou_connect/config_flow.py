@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Mapping
 from hashlib import sha256
@@ -35,32 +36,31 @@ from .captcha import (
     async_update_captcha_session,
     captcha_url,
 )
-from .media import configured_local_cameras, local_camera_key, normalize_local_camera
 from .const import (
-    CONF_CAMERA_ID,
-    CONF_LOCAL_CAMERAS,
-    CONF_LOCAL_PASSWORD,
-    CONF_LOCAL_USERNAME,
-    CONF_ONVIF_PORT,
-    CONF_ONVIF_PROFILE,
-    CONF_ONVIF_PTZ,
-    CONF_REMOVE_CAMERA,
-    CONF_RTSP_PATH,
-    CONF_RTSP_PORT,
-    CONF_VALIDATE_STREAM,
     CAPTCHA_RESUME_AUTHENTICATE,
     CAPTCHA_RESUME_GRANT_OTP,
     CAPTCHA_RESUME_SEND_OTP,
     CONF_ACCOUNT,
+    CONF_CAMERA_ID,
+    CONF_LOCAL_CAMERAS,
+    CONF_LOCAL_HOST,
+    CONF_LOCAL_PASSWORD,
+    CONF_LOCAL_USERNAME,
     CONF_MAX_CONCURRENT_REQUESTS,
     CONF_MAX_PROPERTIES,
+    CONF_ONVIF_PORT,
+    CONF_ONVIF_PROFILE,
+    CONF_ONVIF_PTZ,
     CONF_PASSWORD,
     CONF_POLL_INTERVAL,
+    CONF_REMOVE_CAMERA,
     CONF_REQUEST_TIMEOUT,
     CONF_RESEND_CODE,
+    CONF_RTSP_PATH,
+    CONF_RTSP_PORT,
     CONF_TERMINAL_ID,
-    CONF_LOCAL_HOST,
     CONF_VALID_CODE,
+    CONF_VALIDATE_STREAM,
     DEFAULT_MAX_CONCURRENT_REQUESTS,
     DEFAULT_MAX_PROPERTIES,
     DEFAULT_ONVIF_PORT,
@@ -68,6 +68,7 @@ from .const import (
     DEFAULT_REQUEST_TIMEOUT,
     DOMAIN,
 )
+from .media import local_camera_key, normalize_local_camera, normalize_local_host
 
 
 def _account_unique_id(account: str) -> str:
@@ -110,7 +111,7 @@ class ImouLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @callback
     def async_get_options_flow(
         config_entry: config_entries.ConfigEntry,
-    ) -> "ImouLifeOptionsFlow":
+    ) -> ImouLifeOptionsFlow:
         return ImouLifeOptionsFlow()
 
     def __init__(self) -> None:
@@ -676,12 +677,32 @@ class ImouLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_create_entry(title=title, data=self._data)
 
 
+def _canonical_local_camera_key(key: Any) -> str | None:
+    if not isinstance(key, str):
+        return None
+    try:
+        identity = json.loads(key)
+    except ValueError:
+        return None
+    if (
+        not isinstance(identity, list)
+        or len(identity) != 2
+        or not all(isinstance(item, str) and item for item in identity)
+    ):
+        return None
+    return local_camera_key(*identity)
+
+
 class ImouLifeOptionsFlow(config_entries.OptionsFlow):
     """Allow setting a local LAN host per Imou device for direct RTSP."""
 
     def __init__(self) -> None:
         self._camera_id: str | None = None
         self._choices: dict[str, tuple[str, str]] = {}
+
+    def _saved_local_cameras(self) -> dict[Any, Any]:
+        raw = self.config_entry.options.get(CONF_LOCAL_CAMERAS)
+        return dict(raw) if isinstance(raw, Mapping) else {}
 
     def _available_cameras(self) -> dict[str, tuple[str, str]]:
         runtime = getattr(self.config_entry, "runtime_data", None)
@@ -701,8 +722,24 @@ class ImouLifeOptionsFlow(config_entries.OptionsFlow):
                     path = f"/cam/realmonitor?channel={max(1, number)}&subtype=0"
                     key = local_camera_key(device.device_id, channel.channel_id)
                     choices[key] = (f"{device.name} — {channel.name} [{index}]", path)
-        for key, camera in configured_local_cameras(self.config_entry.options).items():
-            choices.setdefault(key, (camera[CONF_LOCAL_HOST], camera[CONF_RTSP_PATH]))
+        for index, (raw_key, saved) in enumerate(
+            self._saved_local_cameras().items(), 1
+        ):
+            key = _canonical_local_camera_key(raw_key)
+            if key is None:
+                continue
+            label = f"Saved camera {index}"
+            path = "/cam/realmonitor?channel=1&subtype=0"
+            if isinstance(saved, Mapping):
+                try:
+                    normalized = normalize_local_camera(saved)
+                except ValueError:
+                    pass
+                else:
+                    host = normalized[CONF_LOCAL_HOST]
+                    label = f"{host} (saved)"
+                    path = normalized[CONF_RTSP_PATH]
+            choices.setdefault(key, (label, path))
         return choices
 
     async def async_step_init(
@@ -737,8 +774,18 @@ class ImouLifeOptionsFlow(config_entries.OptionsFlow):
         key = self._camera_id
         if key is None or key not in self._choices:
             return await self.async_step_init()
-        cameras = configured_local_cameras(self.config_entry.options)
-        previous = cameras.get(key, {})
+        cameras = self._saved_local_cameras()
+        matching_keys = [
+            raw_key for raw_key in cameras if _canonical_local_camera_key(raw_key) == key
+        ]
+        previous = cameras[matching_keys[-1]] if matching_keys else {}
+        previous = dict(previous) if isinstance(previous, Mapping) else {}
+        for raw_key in matching_keys:
+            if isinstance(cameras[raw_key], Mapping):
+                try:
+                    previous = normalize_local_camera(cameras[raw_key])
+                except ValueError:
+                    pass
         errors: dict[str, str] = {}
         legacy_host = self.config_entry.options.get(CONF_LOCAL_HOST, "")
         if isinstance(legacy_host, Mapping):
@@ -752,10 +799,36 @@ class ImouLifeOptionsFlow(config_entries.OptionsFlow):
             CONF_ONVIF_PROFILE: previous.get(CONF_ONVIF_PROFILE, ""),
             CONF_ONVIF_PTZ: previous.get(CONF_ONVIF_PTZ, True),
         }
+        try:
+            defaults[CONF_LOCAL_HOST] = normalize_local_host(defaults[CONF_LOCAL_HOST])
+        except ValueError:
+            defaults[CONF_LOCAL_HOST] = ""
+        for field, fallback in (
+            (CONF_LOCAL_USERNAME, ""),
+            (CONF_RTSP_PATH, self._choices[key][1]),
+            (CONF_ONVIF_PROFILE, ""),
+        ):
+            if not isinstance(defaults[field], type(fallback)):
+                defaults[field] = fallback
+        onvif_ptz = defaults[CONF_ONVIF_PTZ]
+        if isinstance(onvif_ptz, str):
+            onvif_ptz = onvif_ptz.strip().casefold() in {"1", "true", "on", "yes"}
+        defaults[CONF_ONVIF_PTZ] = bool(onvif_ptz)
+        for field, fallback in (
+            (CONF_RTSP_PORT, 554),
+            (CONF_ONVIF_PORT, DEFAULT_ONVIF_PORT),
+        ):
+            try:
+                defaults[field] = vol.All(
+                    vol.Coerce(str), vol.Coerce(int), vol.Range(min=1, max=65535)
+                )(defaults[field])
+            except vol.Invalid:
+                defaults[field] = fallback
         if user_input is not None:
             defaults.update({field: user_input[field] for field in defaults if field in user_input})
             if user_input.get(CONF_REMOVE_CAMERA):
-                cameras.pop(key, None)
+                for raw_key in matching_keys:
+                    cameras.pop(raw_key)
             else:
                 values = dict(user_input)
                 for field, default_value in (
@@ -791,6 +864,8 @@ class ImouLifeOptionsFlow(config_entries.OptionsFlow):
                         if stream_error:
                             errors["base"] = stream_error
                     if not errors:
+                        for raw_key in matching_keys:
+                            cameras.pop(raw_key)
                         cameras[key] = normalized
             if not errors:
                 options = dict(self.config_entry.options)

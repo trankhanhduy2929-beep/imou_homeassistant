@@ -10,6 +10,15 @@ Custom integration này đăng nhập trực tiếp Imou Life bằng account/pas
 4. Nhập tài khoản và mật khẩu Imou Life.
 5. Nếu Imou yêu cầu CAPTCHA, mở liên kết xác minh do config flow hiển thị. Với mã `12112`, nhập mã SMS/email sáu số ở bước tiếp theo.
 
+**Nâng cấp lên `0.2.3`:** giải nén `imou_connect-custom-component-0.2.3.zip`, chép đè mã trong `/config/custom_components/imou_connect`, rồi restart Home Assistant; giữ nguyên config entry và cấu hình hiện có.
+
+Bản `0.2.3` (ổn định hoá, không đổi luồng ONVIF/RTSP đang chạy):
+
+- **API an toàn hơn:** không theo redirect (tránh lộ credential), từ chối HTTP 3xx/429, chỉ chấp nhận JSON hợp lệ, timestamp ký lấy ngay khi nhận header; lệnh điều khiển (PTZ/Set property/service/OTP) không bị gửi lặp khi timeout/đứt kết nối; mỗi lần refresh token chỉ chạy một lần dù nhiều request cùng fail; log/exception không lộ mô tả/URL/tài khoản.
+- **MQTT ổn định:** một sự kiện lỗi không còn làm dừng vòng nhận; lỗi callback/connection chỉ ghi loại lỗi; hủy request giải phóng future sạch; lỗi sau khi đã publish dùng loại lỗi riêng để **không** fallback HTTP gây gửi trùng.
+- **Entity/trạng thái:** giá trị số không hợp lệ (`inf`/`nan`/text) chuyển `unknown`; push MQTT sai product/channel không làm bẩn state; payload event đã loại property nhạy cảm theo cả ref/identifier; push MQTT giữ được lịch poll và trạng thái thành công; ghi property không ghi đè giá trị vừa đọc lại/kịp push; cảnh báo cũ không phát lại, dùng đúng offset giờ máy chủ.
+- **CAPTCHA/RTSP:** đọc script CAPTCHA off event loop, giới hạn body, tuần tự hoá submit/refresh, giới hạn phiên và loại phiên cũ thay vì lỗi; thăm dò RTSP có deadline phía worker và chỉ một worker, không rò thread; lưu/ xoá camera local không làm mất cấu hình camera khác.
+
 **Nâng cấp lên `0.2.2`:** giải nén `imou_connect-custom-component-0.2.2.zip`, chép đè mã trong `/config/custom_components/imou_connect`, rồi restart Home Assistant; giữ nguyên config entry và cấu hình hiện có.
 
 Bản `0.2.2`:
