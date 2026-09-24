@@ -25,6 +25,7 @@ CONF_RTSP_PATH: Final = "rtsp_path"
 CONF_REMOVE_CAMERA: Final = "remove_camera"
 CONF_VALIDATE_STREAM: Final = "validate_stream"
 CONF_ONVIF_PORT: Final = "onvif_port"
+CONF_ONVIF_PROFILE: Final = "onvif_profile"
 CONF_ONVIF_PTZ: Final = "onvif_ptz"
 
 DEFAULT_POLL_INTERVAL: Final = 30

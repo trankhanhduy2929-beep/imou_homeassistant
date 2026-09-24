@@ -63,7 +63,7 @@
       },
       "local_camera": {
         "title": "RTSP local",
-        "description": "Configure local RTSP for {camera}. Manually enter the camera's IP address or hostname reachable from Home Assistant. Use the camera's local credentials, not your Imou Life account credentials. Leave the password blank to keep the previously configured password. Select the removal option to remove only this camera's local RTSP settings; cloud devices and sensors remain configured.",
+        "description": "Configure local RTSP and optional ONVIF PTZ for {camera}. Manually enter the camera's IP address or hostname reachable from Home Assistant. Use the camera's local credentials, not your Imou Life account credentials. Leave the password blank to keep the previously configured password. Use the RTSP and ONVIF ports from the camera's actual settings rather than guessing. When ONVIF PTZ is enabled, PTZ stays LOCAL; failures never fall back to cloud control. The RTSP check only validates video, not ONVIF. Select the removal option to remove only this camera's local configuration; cloud devices and sensors remain configured.",
         "data": {
           "local_host": "Camera IP address or hostname",
           "rtsp_port": "RTSP port",
@@ -71,9 +71,13 @@
           "local_password": "Local camera password",
           "rtsp_path": "RTSP path",
           "onvif_port": "ONVIF port (PTZ)",
+          "onvif_profile": "ONVIF profile token (optional)",
           "onvif_ptz": "Control PTZ over ONVIF",
           "validate_stream": "Check the RTSP stream before saving",
           "remove_camera": "Remove local camera configuration"
+        },
+        "data_description": {
+          "onvif_profile": "Leave blank to clear any saved token and automatically select a PTZ profile only when the device has one video source. Devices with multiple video sources, including NVRs, require the exact profile token for the intended camera. Tokens are case-sensitive and spaces are preserved."
         }
       }
     },
@@ -82,6 +86,7 @@
       "invalid_host": "Enter a valid camera IP address or hostname without a URL scheme, port, or path.",
       "invalid_port": "Enter an RTSP port number from 1 to 65535.",
       "invalid_onvif_port": "Enter an ONVIF port number from 1 to 65535.",
+      "invalid_onvif_profile": "Enter an ONVIF profile token of up to 256 characters without control characters, or leave blank for automatic selection.",
       "invalid_path": "Enter an RTSP path starting with a single /, without spaces, backslashes, or fragments (#).",
       "invalid_credentials": "Enter local camera credentials: up to 256 characters for the username and 1024 for the password. A username is required when a password is set.",
       "stream_unauthorized": "The camera rejected the local username or password. Check the local camera credentials, not the Imou Life account.",

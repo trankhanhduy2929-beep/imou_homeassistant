@@ -42,6 +42,7 @@ from .const import (
     CONF_LOCAL_PASSWORD,
     CONF_LOCAL_USERNAME,
     CONF_ONVIF_PORT,
+    CONF_ONVIF_PROFILE,
     CONF_ONVIF_PTZ,
     CONF_REMOVE_CAMERA,
     CONF_RTSP_PATH,
@@ -748,6 +749,7 @@ class ImouLifeOptionsFlow(config_entries.OptionsFlow):
             CONF_LOCAL_USERNAME: previous.get(CONF_LOCAL_USERNAME, ""),
             CONF_RTSP_PATH: previous.get(CONF_RTSP_PATH, self._choices[key][1]),
             CONF_ONVIF_PORT: previous.get(CONF_ONVIF_PORT, DEFAULT_ONVIF_PORT),
+            CONF_ONVIF_PROFILE: previous.get(CONF_ONVIF_PROFILE, ""),
             CONF_ONVIF_PTZ: previous.get(CONF_ONVIF_PTZ, True),
         }
         if user_input is not None:
@@ -762,6 +764,7 @@ class ImouLifeOptionsFlow(config_entries.OptionsFlow):
                     (CONF_LOCAL_USERNAME, defaults.get(CONF_LOCAL_USERNAME)),
                     (CONF_RTSP_PATH, defaults.get(CONF_RTSP_PATH)),
                     (CONF_ONVIF_PORT, defaults.get(CONF_ONVIF_PORT)),
+                    (CONF_ONVIF_PROFILE, defaults.get(CONF_ONVIF_PROFILE)),
                     (CONF_ONVIF_PTZ, defaults.get(CONF_ONVIF_PTZ)),
                 ):
                     values.setdefault(field, default_value)
@@ -774,6 +777,7 @@ class ImouLifeOptionsFlow(config_entries.OptionsFlow):
                         "invalid_host": CONF_LOCAL_HOST,
                         "invalid_port": CONF_RTSP_PORT,
                         "invalid_onvif_port": CONF_ONVIF_PORT,
+                        "invalid_onvif_profile": CONF_ONVIF_PROFILE,
                         "invalid_path": CONF_RTSP_PATH,
                         "invalid_credentials": CONF_LOCAL_USERNAME,
                     }
@@ -818,6 +822,12 @@ class ImouLifeOptionsFlow(config_entries.OptionsFlow):
                     vol.Coerce(str),
                     vol.Coerce(int),
                     vol.Range(min=1, max=65535),
+                ),
+                vol.Optional(
+                    CONF_ONVIF_PROFILE,
+                    default=defaults[CONF_ONVIF_PROFILE],
+                ): selector.TextSelector(
+                    selector.TextSelectorConfig(type=selector.TextSelectorType.TEXT)
                 ),
                 vol.Optional(
                     CONF_ONVIF_PTZ,

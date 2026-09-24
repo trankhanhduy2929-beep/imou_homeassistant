@@ -10,6 +10,16 @@ Custom integration này đăng nhập trực tiếp Imou Life bằng account/pas
 4. Nhập tài khoản và mật khẩu Imou Life.
 5. Nếu Imou yêu cầu CAPTCHA, mở liên kết xác minh do config flow hiển thị. Với mã `12112`, nhập mã SMS/email sáu số ở bước tiếp theo.
 
+**Nâng cấp lên `0.2.2`:** giải nén `imou_connect-custom-component-0.2.2.zip`, chép đè mã trong `/config/custom_components/imou_connect`, rồi restart Home Assistant; giữ nguyên config entry và cấu hình hiện có.
+
+Bản `0.2.2`:
+
+- **Sửa ONVIF dùng sai giao thức:** `GetProfiles` phải gọi dịch vụ **Media** (`tt:Media`), không phải dịch vụ PTZ; nay tách đúng endpoint Media/PTZ từ `GetCapabilities`, chọn profile có `tt:PTZConfiguration`, gửi `ContinuousMove`/`Stop` đúng namespace SOAP 1.2 kèm `action`.
+- **Không còn lặng lẽ rơi về cloud:** khi đã cấu hình ONVIF cho channel, lỗi ONVIF (kể cả lỗi tạm thời/mạng) được báo rõ và **không** gửi lệnh cloud; lỗi cloud `12100`/`13255` không còn che lỗi local. Nút vẫn bấm lại được để thử lại.
+- **An toàn:** luôn `Stop` trong `finally` (kể cả khi hủy/timeout), `Timeout` hữu hạn, nối tiếp lệnh qua `Stop`, giới hạn response 1 MiB, không theo redirect (tránh lộ credential), kiểm tra URL dịch vụ và dùng đúng host/port đã cấu hình.
+- **Profile cho nhiều nguồn:** thêm ô cấu hình `ONVIF profile` (để trống = tự chọn khi chỉ có một nguồn; NVR/nhiều nguồn phải nhập đúng token). Nút PTZ hiện cả khi cloud không khai báo PTZ nếu channel đã cấu hình ONVIF.
+- **Log riêng tư:** không ghi raw desc/URL/tài khoản; chỉ `no authority`/`has no auth` được giữ.
+
 **Nâng cấp lên `0.2.1`:** giải nén `imou_connect-custom-component-0.2.1.zip`, chép đè mã trong `/config/custom_components/imou_connect`, rồi restart Home Assistant; giữ nguyên config entry và cấu hình hiện có.
 
 Bản `0.2.1`:

@@ -63,7 +63,7 @@
       },
       "local_camera": {
         "title": "RTSP nội bộ",
-        "description": "Cấu hình RTSP nội bộ cho {camera}. Nhập thủ công địa chỉ IP hoặc tên máy chủ của camera mà Home Assistant có thể truy cập. Dùng thông tin đăng nhập nội bộ của camera, không phải tài khoản Imou Life. Để trống mật khẩu để giữ mật khẩu đã cấu hình trước đó. Chọn tùy chọn xóa để chỉ xóa cấu hình RTSP nội bộ của camera này; thiết bị và cảm biến qua cloud vẫn được giữ nguyên.",
+        "description": "Cấu hình RTSP nội bộ và ONVIF PTZ tùy chọn cho {camera}. Nhập thủ công địa chỉ IP hoặc tên máy chủ của camera mà Home Assistant có thể truy cập. Dùng thông tin đăng nhập nội bộ của camera, không phải tài khoản Imou Life. Để trống mật khẩu để giữ mật khẩu đã cấu hình trước đó. Dùng cổng RTSP và ONVIF theo cài đặt thực tế của camera, không đoán cổng. Khi bật ONVIF PTZ, điều khiển PTZ luôn qua mạng nội bộ (LOCAL); nếu lỗi sẽ không chuyển sang cloud. Kiểm tra RTSP chỉ xác minh video, không kiểm tra ONVIF. Chọn tùy chọn xóa để chỉ xóa cấu hình nội bộ của camera này; thiết bị và cảm biến qua cloud vẫn được giữ nguyên.",
         "data": {
           "local_host": "Địa chỉ IP hoặc tên máy chủ của camera",
           "rtsp_port": "Cổng RTSP",
@@ -71,9 +71,13 @@
           "local_password": "Mật khẩu nội bộ của camera",
           "rtsp_path": "Đường dẫn RTSP",
           "onvif_port": "Cổng ONVIF (PTZ)",
+          "onvif_profile": "Token hồ sơ ONVIF (tùy chọn)",
           "onvif_ptz": "Điều khiển PTZ qua ONVIF",
           "validate_stream": "Kiểm tra luồng RTSP trước khi lưu",
           "remove_camera": "Xóa cấu hình camera nội bộ"
+        },
+        "data_description": {
+          "onvif_profile": "Để trống để xóa token đã lưu và tự động chọn hồ sơ PTZ chỉ khi thiết bị có một nguồn video. Thiết bị có nhiều nguồn video, bao gồm đầu ghi NVR, phải nhập chính xác token hồ sơ của camera cần điều khiển. Token phân biệt chữ hoa, chữ thường và giữ nguyên khoảng trắng."
         }
       }
     },
@@ -82,6 +86,7 @@
       "invalid_host": "Nhập địa chỉ IP hoặc tên máy chủ hợp lệ của camera, không kèm giao thức URL, cổng hoặc đường dẫn.",
       "invalid_port": "Nhập số cổng RTSP từ 1 đến 65535.",
       "invalid_onvif_port": "Nhập số cổng ONVIF từ 1 đến 65535.",
+      "invalid_onvif_profile": "Nhập token hồ sơ ONVIF tối đa 256 ký tự, không chứa ký tự điều khiển, hoặc để trống để chọn tự động.",
       "invalid_path": "Nhập đường dẫn RTSP bắt đầu bằng một dấu /, không chứa khoảng trắng, dấu gạch chéo ngược hoặc phần fragment (#).",
       "invalid_credentials": "Nhập thông tin đăng nhập nội bộ của camera: tên đăng nhập tối đa 256 ký tự và mật khẩu tối đa 1024 ký tự. Phải có tên đăng nhập khi đặt mật khẩu.",
       "stream_unauthorized": "Camera từ chối tên đăng nhập hoặc mật khẩu nội bộ. Kiểm tra thông tin nội bộ của camera, không phải tài khoản Imou Life.",

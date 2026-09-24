@@ -837,10 +837,8 @@ def _safe_error_detail(value: Any) -> str:
     """Return a short, single-line server message safe to log."""
     if not isinstance(value, str):
         return ""
-    text = " ".join(value.split())
-    if len(text) > 200:
-        text = f"{text[:200]}..."
-    return text
+    text = " ".join(value.split()).casefold()
+    return text if text in {"", "no authority", "has no auth"} else "<redacted>"
 
 
 @lru_cache(maxsize=1)

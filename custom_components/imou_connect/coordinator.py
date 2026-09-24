@@ -26,10 +26,12 @@ from .api import (
     ImouTwoStepVerificationRequired,
 )
 from .const import (
+    CONF_LOCAL_CAMERAS,
     CONF_LOCAL_HOST,
     CONF_LOCAL_PASSWORD,
     CONF_LOCAL_USERNAME,
     CONF_ONVIF_PORT,
+    CONF_ONVIF_PROFILE,
     CONF_ONVIF_PTZ,
     DEFAULT_ONVIF_PORT,
     DOMAIN,
@@ -587,11 +589,13 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
         device = self.device(device_id)
         if device is None:
             raise UpdateFailed("Imou device is no longer available")
-        if device_id in self._ptz_rejected:
-            raise UpdateFailed("Imou PTZ control is not available for this device")
+        if not any(channel.channel_id == str(channel_id) for channel in device.channels):
+            raise UpdateFailed("Imou camera channel is no longer available")
         onvif = self._onvif_client(device_id, channel_id)
-        if onvif is not None and await onvif.async_supported():
+        if onvif is not None:
             try:
+                if not await onvif.async_supported():
+                    raise OnvifPtzError("Camera has no PTZ-enabled ONVIF media profile")
                 await onvif.async_move(
                     pan=horizontal,
                     tilt=vertical,
@@ -600,9 +604,13 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
                 )
             except OnvifPtzError as err:
                 raise UpdateFailed(
-                    f"Could not move Imou PTZ camera over ONVIF: {err}"
-                ) from err
+                    f"Could not move Imou PTZ camera over ONVIF: {err}. "
+                    "Check this camera's ONVIF settings in Imou Connect Configure; "
+                    "no cloud PTZ command was sent"
+                ) from None
             return
+        if device_id in self._ptz_rejected:
+            raise UpdateFailed("Imou cloud PTZ was rejected; configure ONVIF LAN for this camera")
         discovered = [
             item
             for item in dict.fromkeys(
@@ -646,8 +654,10 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
                 "Imou PTZ not permitted device=%s code=%s", device_id, last_error.code
             )
         raise UpdateFailed(
-            f"Could not move Imou PTZ camera: {last_error}"
-        ) from last_error
+            f"Imou cloud PTZ failed (code={last_error.code}); "
+            "configure this camera's local IP, ONVIF port and credentials "
+            "in Imou Connect Configure to use ONVIF LAN"
+        ) from None
 
     async def _async_try_ptz(
         self,
@@ -694,7 +704,12 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
             return None
         key = local_camera_key(device_id, channel_id)
         camera = configured_local_cameras(options).get(key)
-        if not camera or not camera.get(CONF_ONVIF_PTZ):
+        if camera is None:
+            raw = options.get(CONF_LOCAL_CAMERAS)
+            if isinstance(raw, Mapping) and key in raw:
+                raise UpdateFailed("Invalid local camera configuration; edit ONVIF settings in Configure")
+            return None
+        if not camera.get(CONF_ONVIF_PTZ):
             return None
         client = self._onvif_clients.get(key)
         if client is None:
@@ -704,10 +719,20 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
                 int(camera.get(CONF_ONVIF_PORT, DEFAULT_ONVIF_PORT)),
                 camera[CONF_LOCAL_USERNAME],
                 camera[CONF_LOCAL_PASSWORD],
+                profile_token=camera.get(CONF_ONVIF_PROFILE, ""),
             )
             self._onvif_clients[key] = client
         return client
 
-    def ptz_available(self, device_id: str) -> bool:
+    def local_ptz_configured(self, device_id: str, channel_id: str) -> bool:
+        options = getattr(self.config_entry, "options", None)
+        if not isinstance(options, Mapping):
+            return False
+        camera = configured_local_cameras(options).get(local_camera_key(device_id, channel_id))
+        return bool(camera and camera.get(CONF_ONVIF_PTZ))
+
+    def ptz_available(self, device_id: str, channel_id: str | None = None) -> bool:
         """Return whether PTZ control is still expected to work for a device."""
+        if channel_id is not None and self.local_ptz_configured(device_id, channel_id):
+            return True
         return device_id not in self._ptz_rejected

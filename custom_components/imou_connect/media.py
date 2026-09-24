@@ -15,6 +15,7 @@ from .const import (
     CONF_LOCAL_PASSWORD,
     CONF_LOCAL_USERNAME,
     CONF_ONVIF_PORT,
+    CONF_ONVIF_PROFILE,
     CONF_ONVIF_PTZ,
     CONF_RTSP_PATH,
     CONF_RTSP_PORT,
@@ -178,10 +179,17 @@ def normalize_local_camera(value: Mapping[str, Any]) -> dict[str, Any]:
     onvif_port = int(raw_onvif_port)
     if not 1 <= onvif_port <= 65535:
         raise ValueError("invalid_onvif_port")
+    onvif_profile = value.get(CONF_ONVIF_PROFILE, "")
+    if (
+        not isinstance(onvif_profile, str)
+        or len(onvif_profile) > 256
+        or any(ord(char) < 32 or 127 <= ord(char) <= 159 for char in onvif_profile)
+    ):
+        raise ValueError("invalid_onvif_profile")
     onvif_ptz = value.get(CONF_ONVIF_PTZ, True)
     if isinstance(onvif_ptz, str):
         onvif_ptz = onvif_ptz.strip().casefold() in {"1", "true", "on", "yes"}
-    return {
+    camera = {
         CONF_LOCAL_HOST: host,
         CONF_RTSP_PORT: port,
         CONF_LOCAL_USERNAME: username,
@@ -190,6 +198,9 @@ def normalize_local_camera(value: Mapping[str, Any]) -> dict[str, Any]:
         CONF_ONVIF_PORT: onvif_port,
         CONF_ONVIF_PTZ: bool(onvif_ptz),
     }
+    if onvif_profile:
+        camera[CONF_ONVIF_PROFILE] = onvif_profile
+    return camera
 
 
 def configured_local_cameras(options: Mapping[str, Any]) -> dict[str, dict[str, Any]]:

@@ -58,8 +58,8 @@ async def async_setup_entry(
         for service in device.thing_model.services:
             if service.zero_input:
                 yield ImouServiceButton(coordinator, device, service)
-        if device.supports_ptz:
-            for channel in device.channels:
+        for channel in device.channels:
+            if device.supports_ptz or coordinator.local_ptz_configured(device.device_id, channel.channel_id):
                 for direction in PTZ_DIRECTIONS:
                     yield ImouPtzButton(coordinator, device, channel, direction)
 
@@ -117,7 +117,9 @@ class ImouPtzButton(ImouChannelEntity, ButtonEntity):
     @property
     def available(self) -> bool:
         """Return availability, honoring a rejected PTZ capability."""
-        return super().available and self.coordinator.ptz_available(self.device_id)
+        if self.coordinator.local_ptz_configured(self.device_id, self.channel_id):
+            return self._definition_available and self.channel is not None
+        return super().available and self.coordinator.ptz_available(self.device_id, self.channel_id)
 
     async def async_press(self) -> None:
         """Send one short PTZ move for this direction."""

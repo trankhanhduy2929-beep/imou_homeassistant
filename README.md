@@ -66,13 +66,17 @@ bạn đã nhập cho RTSP, nên không phụ thuộc cloud:
 - Bật ONVIF trên camera (app Imou Life → cài đặt camera → ONVIF), rồi vào
   **Settings → Imou Connect → Configure**, chọn camera và đặt **Cổng ONVIF (PTZ)** (mặc định
   **80**, nhiều model dùng **8000**) cùng ô **Điều khiển PTZ qua ONVIF**.
-- Mỗi lần bấm gửi `ContinuousMove` (vận tốc theo hướng) rồi `Stop` sau ~200 ms, xác thực bằng
-  WSSE UsernameToken với tài khoản local của camera.
+- Nếu camera/NVR có nhiều nguồn video, nhập **ONVIF profile token** chính xác; để trống khi
+  camera chỉ có một nguồn (tự chọn profile có PTZ).
+- Mỗi lần bấm: `GetCapabilities` → chọn endpoint **Media/PTZ**, `GetProfiles` (dịch vụ Media),
+  rồi gửi `ContinuousMove` (vận tốc theo hướng) và `Stop` sau ~200 ms, xác thực WSSE
+  UsernameToken bằng tài khoản local của camera.
 
-Nếu camera không có dịch vụ PTZ ONVIF, integration tự quay về route cloud `things.ptz.PtzMove`
-tới host stream-entry của thiết bị. Lưu ý: một số model bị Imou từ chối cloud PTZ
-(`12100`/`13255`), khi đó hãy dùng ONVIF LAN. Chỉ tạo nút khi model thiết bị/trường `ability`
-khai báo có PTZ.
+**Khi đã cấu hình ONVIF cho channel, lệnh đi hoàn toàn qua LAN**: nếu ONVIF lỗi (mạng, sai cổng,
+sai tài khoản, không có profile PTZ), integration báo rõ và **không** gửi lệnh cloud, nên lỗi
+cloud `12100`/`13255` không còn che nguyên nhân. Nút vẫn bấm lại được để thử lại sau khi sửa
+Configure. Nếu channel chưa cấu hình ONVIF, integration dùng route cloud
+`things.ptz.PtzMove` (một số model bị Imou từ chối cloud PTZ — khi đó hãy dùng ONVIF LAN).
 
 > Cloud PTZ (dự phòng) dùng trục chuẩn hóa và dấu như app Imou Life `10.1.6` (`±0.625` cho
 > pan/tilt, `±0.5` cho zoom), gửi tới `streamEntryAddr` từ `device.list.DetailInfoQuery` với CA
@@ -138,7 +142,8 @@ Camera entity được tạo sau khi lưu cấu hình và cấu hình đã lưu 
 | Chỉ thấy vài entity, thiếu setting/nút | Cập nhật lên `0.1.20` rồi reload integration để discovery/model và entity được làm mới; nếu vẫn thiếu, gửi log đã che thông tin |
 | Log lặp `DeviceListPageGet code=404` | Cập nhật lên `0.1.22`: endpoint legacy không có trên endpoint khu vực đó sẽ được ghi nhớ 1 giờ và chỉ ghi DEBUG, không ảnh hưởng thiết bị |
 | Không thấy nút PTZ | Cập nhật lên `0.1.23`. Nút chỉ xuất hiện khi model thiết bị khai báo PTZ; kiểm tra thiết bị có PTZ thật không, thử phát trực tiếp trong app Imou Life, và xem log đã che thông tin |
-| Bấm PTZ báo `code=12100` / `13255` | Cloud PTZ của model này bị Imou từ chối. Cập nhật lên `0.2.0` và dùng **ONVIF LAN**: bật ONVIF trên camera rồi đặt cổng ONVIF trong **Configure** (80 hoặc 8000) |
+| Bấm PTZ báo `code=12100` / `13255` (cloud) | Cloud PTZ của model này bị Imou từ chối. Cập nhật lên `0.2.2` và dùng **ONVIF LAN**: bật ONVIF trên camera rồi đặt cổng ONVIF trong **Configure** (80 hoặc 8000). Khi đã cấu hình ONVIF, lỗi cloud không còn bị gọi tới |
+| Bấm PTZ báo lỗi ONVIF (mạng/timeout/auth/profile) | Sửa đúng **Cổng ONVIF**, tài khoản local và (nếu nhiều nguồn) **ONVIF profile token** trong **Configure**. Thử `http://<IP-camera>/onvif/device_service` từ cùng LAN. Không có fallback cloud khi đã cấu hình ONVIF |
 | PTZ không nhúc nhích dù không báo lỗi | Kiểm tra đã bật ONVIF trên camera và đúng **Cổng ONVIF**; thử `http://<IP-camera>/onvif/device_service` từ máy cùng LAN. Nếu sai cổng/tài khoản, sửa trong **Configure** |
 | PTZ vẫn lỗi | Vào **Settings → Imou Connect → ba chấm → Download diagnostics**, gửi phần thiết bị (che sẵn password/token/p2p/URL) để kiểm tra tiếp |
 
@@ -162,7 +167,7 @@ Khi báo lỗi, gửi log Home Assistant và thuộc tính chẩn đoán. **Khô
 - Camera LAN `192.168.5.155` phát được 2304×1296 HEVC 5 frame trong 0.08s qua RTSP TCP và ONVIF kết nối được.
 - Kiểm tra RTSP khi Configure đã thử thật: host không tới trả `stream_timeout`, sai mật khẩu camera trả `stream_unauthorized`.
 - Discovery bổ sung và làm mới entity dùng fixture tổng hợp; **chưa xác minh payload thật của tài khoản từng bị thiếu entity**.
-- PTZ: client ONVIF LAN (WSSE + `ContinuousMove`/`Stop`) và route cloud dự phòng `things.ptz.PtzMove` (trục/dấu đối chiếu từ APK `10.1.6`) được kiểm thử tự động; **chưa chạy trên camera PTZ thật**, hãy tự kiểm tra với thiết bị của bạn.
+- PTZ: client ONVIF LAN (WSSE, `GetCapabilities`/Media `GetProfiles`/`ContinuousMove`/`Stop`, SOAP 1.2 qua máy chủ giả loopback) và route cloud `things.ptz.PtzMove` (trục/dấu đối chiếu từ APK `10.1.6`) được kiểm thử tự động; **chưa chạy trên camera PTZ thật**, hãy tự kiểm tra với thiết bị của bạn.
 - Motion/person kích hoạt vật lý có thể chưa được xác minh đầy đủ trên mọi model; hãy tự kiểm tra với camera của bạn.
 
 ## Ghi nhận
