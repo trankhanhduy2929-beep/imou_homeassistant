@@ -10,6 +10,15 @@ Custom integration này đăng nhập trực tiếp Imou Life bằng account/pas
 4. Nhập tài khoản và mật khẩu Imou Life.
 5. Nếu Imou yêu cầu CAPTCHA, mở liên kết xác minh do config flow hiển thị. Với mã `12112`, nhập mã SMS/email sáu số ở bước tiếp theo.
 
+**Nâng cấp lên `0.2.4`:** giải nén `imou_connect-custom-component-0.2.4.zip`, chép đè mã trong `/config/custom_components/imou_connect`, rồi restart Home Assistant; giữ nguyên cấu hình hiện có.
+
+Bản `0.2.4`:
+
+- **Ảnh xem trước không phụ thuộc go2rtc:** camera tự lấy JPEG qua bộ xử lý stream gốc của Home Assistant, tránh đường `go2rtc /api/frame.jpeg` ném lỗi HTTP 500. URL RTSP, RTSP-over-TCP, entity ID và mã ONVIF/PTZ không đổi; không cần thêm thư viện vào integration.
+- **Giới hạn tải:** chờ ảnh tối đa 9 giây cho mỗi yêu cầu, cache một ảnh theo kích thước trong 1 giây, nghỉ 2 giây sau lỗi. Một tác vụ chụp ảnh mỗi camera; hủy yêu cầu HTTP không khởi chạy thêm decoder khi tác vụ trước chưa kết thúc. Ảnh cũ của decoder không được gia hạn cache hoặc gán sang kích thước mới.
+- **Dọn tài nguyên:** reload/gỡ camera chờ tác vụ đang chạy, dừng stream và xóa cache, không sửa thiết lập preload gốc của HA. Log chỉ ghi loại lỗi, không chứa URL RTSP hay thông tin đăng nhập.
+- **Kiểm chứng:** test mô phỏng provider go2rtc lỗi, cold start, kích thước ảnh, timeout/cancellation và executor; tạo JPEG bằng decoder thật của HA từ video H.264/H.265 tổng hợp. Chưa kiểm thử bản sửa trên camera thật của người dùng; log ban đầu chưa xác định nguyên nhân bên trong go2rtc.
+
 **Nâng cấp lên `0.2.3`:** giải nén `imou_connect-custom-component-0.2.3.zip`, chép đè mã trong `/config/custom_components/imou_connect`, rồi restart Home Assistant; giữ nguyên config entry và cấu hình hiện có.
 
 Bản `0.2.3` (ổn định hoá, không đổi luồng ONVIF/RTSP đang chạy):
