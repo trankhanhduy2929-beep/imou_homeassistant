@@ -177,9 +177,15 @@ def async_setup_dynamic_entities(
                 device.supports_ptz,
                 coordinator.max_properties,
                 tuple(
-                    (channel.channel_id, channel.name, channel.product_id)
+                    (
+                        channel.channel_id,
+                        channel.name,
+                        channel.product_id,
+                        tuple(sorted(channel.abilities.items())),
+                    )
                     for channel in device.channels
                 ),
+                tuple(sorted(device.details)),
                 device.thing_model,
             )
             if known_signatures.get(device.device_id) == signature:

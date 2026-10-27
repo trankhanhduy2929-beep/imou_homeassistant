@@ -6,6 +6,7 @@ import json
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
 from typing import Any, Final
 
 from .const import PTZ_STREAM_HOST_FIELDS
@@ -205,6 +206,25 @@ def is_online_status(value: Any) -> bool | None:
 
 ABILITY_KEYS: Final = ("ability", "abilities", "capability", "capabilities")
 
+ABILITY_SWITCH_TYPES: Final = {
+    "headerDetect": ("Phát hiện người", "mdi:human"),
+    "mdw": ("Vùng phát hiện chuyển động", "mdi:vector-square"),
+    "mds": ("Độ nhạy phát hiện chuyển động", "mdi:tune"),
+    "osd": ("Hiển thị trên màn hình", "mdi:monitor-eye"),
+    "breathingLight": ("Đèn breathing", "mdi:lightbulb-outline"),
+}
+
+
+def ability_switch_types(
+    device_raw: Mapping[str, Any], channel_raw: Mapping[str, Any] | None = None
+) -> tuple[str, ...]:
+    """Return cloud ability switches declared by the device or channel."""
+    text = f"{_flatten_ability_text(device_raw)} {_flatten_ability_text(channel_raw or {})}"
+    tokens = {token.casefold() for token in re.split(r"[^A-Za-z0-9]+", text)}
+    return tuple(
+        ability for ability in ABILITY_SWITCH_TYPES if ability.casefold() in tokens
+    )
+
 
 def _raw_declares_ability(raw: Mapping[str, Any], ability: str) -> bool:
     """Return whether raw device metadata lists a named capability."""
@@ -256,7 +276,17 @@ class ImouChannel:
     status: str | None = None
     picture_url: str | None = None
     product_id: str | None = None
+    abilities: Mapping[str, bool] = field(default_factory=dict, repr=False)
     raw: Mapping[str, Any] = field(default_factory=dict, repr=False, compare=False)
+
+    @property
+    def ability_switches(self) -> tuple[tuple[str, str, str, bool], ...]:
+        """Return supported ability switch type, label, icon, and state."""
+        return tuple(
+            (ability, *ABILITY_SWITCH_TYPES[ability], enabled)
+            for ability, enabled in self.abilities.items()
+            if ability in ABILITY_SWITCH_TYPES
+        )
 
 
 @dataclass(slots=True, frozen=True)
@@ -324,7 +354,9 @@ class ThingModel:
                 not (prop.readable or prop.writable)
                 or prop.sensitive
                 or prop.data_type not in PRIMITIVE_TYPES
-                or prop.writable and prop.data_type == "enum" and not prop.enum_options
+                or prop.writable
+                and prop.data_type == "enum"
+                and not prop.enum_options
             ):
                 continue
             result.append(prop)
@@ -346,9 +378,7 @@ class ThingModel:
     @property
     def supports_zoom(self) -> bool:
         """Return whether the thing model advertises zoom control."""
-        return any(
-            "zoom" in identifier.lower() for identifier in self._identifiers()
-        )
+        return any("zoom" in identifier.lower() for identifier in self._identifiers())
 
 
 @dataclass(slots=True, frozen=True)
@@ -369,7 +399,62 @@ class ImouDevice:
     thing_model: ThingModel = field(
         default_factory=ThingModel, repr=False, compare=False
     )
+    details: Mapping[str, Any] = field(default_factory=dict, repr=False, compare=False)
     raw: Mapping[str, Any] = field(default_factory=dict, repr=False, compare=False)
+
+    @property
+    def wifi_signal(self) -> int | None:
+        """Return the cloud-reported Wi-Fi signal strength percentage."""
+        wifi = self.details.get("wifiState")
+        if not isinstance(wifi, Mapping):
+            return None
+        raw_signal = wifi.get("sigStrength")
+        if raw_signal in (None, ""):
+            return None
+        try:
+            return max(0, min(100, int(float(raw_signal))))
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+    @property
+    def wifi_ssid(self) -> str | None:
+        """Return the connected Wi-Fi network name."""
+        wifi = self.details.get("wifiState")
+        return (
+            str(wifi.get("ssId"))
+            if isinstance(wifi, Mapping) and wifi.get("ssId")
+            else None
+        )
+
+    @property
+    def sdcard_status(self) -> str | None:
+        """Return the cloud-reported SD card state."""
+        value = self.details.get("sdcardStatus")
+        return str(value) if value not in (None, "") else None
+
+    @property
+    def firmware_version(self) -> str | None:
+        """Return the device firmware version."""
+        value = self.details.get("version")
+        return str(value) if value not in (None, "") else None
+
+    @property
+    def last_offline(self) -> datetime | None:
+        """Return the last cloud-reported offline timestamp."""
+        value = self.details.get("lastOffLineTime")
+        if not value:
+            return None
+        try:
+            return datetime.strptime(str(value), "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
+        except ValueError:
+            return None
+
+    @property
+    def supports_ability_switches(self) -> bool:
+        """Return whether the cloud exposes PaaS ability switches."""
+        return not self.product_id and any(
+            channel.abilities for channel in self.channels
+        )
 
     @property
     def online(self) -> bool | None:
@@ -393,6 +478,27 @@ class ImouDevice:
     def with_thing_model(self, model: ThingModel) -> ImouDevice:
         """Return a copy with a parsed thing model."""
         return replace(self, thing_model=model)
+
+    def with_details(self, details: Mapping[str, Any]) -> ImouDevice:
+        """Return a copy with fresh cloud device details."""
+        return replace(self, details=dict(details))
+
+    def with_channel_abilities(
+        self, abilities: Mapping[str, Mapping[str, bool]]
+    ) -> ImouDevice:
+        """Return a copy with fresh per-channel cloud ability switch states."""
+        return replace(
+            self,
+            channels=tuple(
+                replace(
+                    channel,
+                    abilities=dict(
+                        abilities.get(channel.channel_id, channel.abilities)
+                    ),
+                )
+                for channel in self.channels
+            ),
+        )
 
 
 def _float_or_none(value: Any) -> float | None:
@@ -502,16 +608,15 @@ def parse_thing_model(
                     if isinstance(child, Mapping)
                     and (prop := _parse_property(child, default_access="w")) is not None
                 )
-                if inputs_valid else ()
+                if inputs_valid
+                else ()
             )
             inputs_valid = inputs_valid and len(inputs) == len(raw_inputs)
             services.append(
                 ThingService(
                     identifier=identifier,
                     ref=ref,
-                    name=_model_name(
-                        identifier, item.get("name"), f"Dịch vụ {ref}"
-                    ),
+                    name=_model_name(identifier, item.get("name"), f"Dịch vụ {ref}"),
                     input_data=inputs,
                     input_data_valid=inputs_valid,
                 )
@@ -520,7 +625,7 @@ def parse_thing_model(
 
 
 def normalize_property_values(
-    definitions: Iterable[ThingProperty], values: Mapping[str, Any]
+    definitions: Iterable[ThingProperty], values: Mapping[Any, Any]
 ) -> dict[str, Any]:
     """Map API values keyed by either refs or identifiers to identifiers."""
     normalized: dict[str, Any] = {}
@@ -571,7 +676,9 @@ def device_from_api(raw: Mapping[str, Any]) -> ImouDevice | None:
         for index, channel in enumerate(raw_channels):
             if not isinstance(channel, Mapping):
                 continue
-            channel_id = _api_identifier(channel, "channelId", "channelid") or str(index)
+            channel_id = _api_identifier(channel, "channelId", "channelid") or str(
+                index
+            )
             merged = channel_data.setdefault(channel_id, {})
             for field_name, value in channel.items():
                 if (
@@ -595,7 +702,9 @@ def device_from_api(raw: Mapping[str, Any]) -> ImouDevice | None:
             status=str(channel.get("status"))
             if channel.get("status") is not None
             else None,
-            picture_url=_first(channel, "picUrl", "picurl", "pictureUrl", "thumbnailUrl"),
+            picture_url=_first(
+                channel, "picUrl", "picurl", "pictureUrl", "thumbnailUrl"
+            ),
             product_id=_api_identifier(channel, "productId", "productid") or product_id,
             raw=dict(channel),
         )
@@ -620,7 +729,10 @@ def device_from_api(raw: Mapping[str, Any]) -> ImouDevice | None:
     if not product_id and len(channels) == 1:
         for key in ("channelNum", "channelnum", "productChannelNum"):
             try:
-                if raw.get(key) not in (None, "") and int(_api_identifier(raw, key)) != 1:
+                if (
+                    raw.get(key) not in (None, "")
+                    and int(_api_identifier(raw, key)) != 1
+                ):
                     break
             except (TypeError, ValueError, OverflowError):
                 break

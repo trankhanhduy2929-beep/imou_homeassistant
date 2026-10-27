@@ -6,15 +6,27 @@ from collections.abc import Iterable
 from math import isfinite
 from typing import Any
 
-from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
-from homeassistant.const import PERCENTAGE, UnitOfTemperature
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
+from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import ImouConfigEntry
-from .entity import ImouPropertyEntity, async_setup_dynamic_entities
+from .entity import ImouEntity, ImouPropertyEntity, async_setup_dynamic_entities
 from .models import ImouDevice, ThingProperty
+
+DETAIL_SENSORS = {
+    "wifi_signal": ("Tín hiệu Wi-Fi", "mdi:wifi", PERCENTAGE),
+    "wifi_ssid": ("Tên Wi-Fi", "mdi:wifi", None),
+    "sdcard_status": ("Thẻ nhớ", "mdi:sd", None),
+    "firmware_version": ("Phiên bản firmware", "mdi:chip", None),
+    "last_offline": ("Lần offline cuối", "mdi:clock-outline", None),
+}
 
 
 async def async_setup_entry(
@@ -29,6 +41,9 @@ async def async_setup_entry(
         for prop in device.thing_model.exposed_properties(coordinator.max_properties):
             if not prop.writable and prop.data_type != "bool":
                 yield ImouPropertySensor(coordinator, device, prop)
+        if not device.product_id:
+            for key, definition in DETAIL_SENSORS.items():
+                yield ImouDetailSensor(coordinator, device, key, definition)
 
     async_setup_dynamic_entities(coordinator, entry, async_add_entities, build)
 
@@ -36,9 +51,7 @@ async def async_setup_entry(
 class ImouPropertySensor(ImouPropertyEntity, SensorEntity):
     """Read-only primitive thing-model property."""
 
-    def __init__(
-        self, coordinator, device: ImouDevice, prop: ThingProperty
-    ) -> None:
+    def __init__(self, coordinator, device: ImouDevice, prop: ThingProperty) -> None:
         """Initialize an Imou property sensor."""
         super().__init__(coordinator, device, prop)
         self._attr_native_unit_of_measurement = prop.unit
@@ -77,3 +90,42 @@ class ImouPropertySensor(ImouPropertyEntity, SensorEntity):
             raw = str(value)
             return self.property.enum_labels.get(raw, raw)
         return str(value)
+
+
+class ImouDetailSensor(ImouEntity, SensorEntity):
+    """Diagnostic sensor sourced from the cloud device detail record."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator,
+        device: ImouDevice,
+        key: str,
+        definition: tuple[str, str, str | None],
+    ) -> None:
+        """Initialize a cloud detail sensor."""
+        label, icon, unit = definition
+        super().__init__(
+            coordinator,
+            device,
+            unique_suffix=f"detail_{key}",
+            name=label,
+        )
+        self.detail_key = key
+        self._attr_icon = icon
+        self._attr_native_unit_of_measurement = unit
+        if key == "wifi_signal":
+            self._attr_state_class = SensorStateClass.MEASUREMENT
+        elif key == "last_offline":
+            self._attr_device_class = SensorDeviceClass.TIMESTAMP
+
+    @property
+    def native_value(self) -> Any:
+        """Return the latest cloud detail value."""
+        device = self.device
+        if device is None:
+            return None
+        if self.detail_key == "last_offline":
+            return device.last_offline
+        return getattr(device, self.detail_key, None)

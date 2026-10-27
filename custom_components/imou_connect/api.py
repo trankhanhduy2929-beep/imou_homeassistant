@@ -15,7 +15,13 @@ import time
 from base64 import b64decode, b64encode
 from binascii import Error as BinasciiError
 from collections import OrderedDict
-from collections.abc import Awaitable, Callable, Mapping, MutableMapping
+from collections.abc import (
+    Awaitable,
+    Callable,
+    Iterable,
+    Mapping,
+    MutableMapping,
+)
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from functools import lru_cache
@@ -84,6 +90,10 @@ GET_TOKEN_REVISION = "185606"
 LOGIN_REVISION = "198828"
 LATEST_ALARM_REVISION = "193687"
 LEGACY_LATEST_ALARM_REVISION = "3421"
+DEVICE_DETAILS_API = "device.list.CommonDeviceDetailsInfoGetByDeviceId"
+ABILITY_QUERY_API = "device.ability.AbilityEnableQuery"
+ABILITY_CONFIG_API = "device.ability.AbilityEnableConfig"
+ABILITY_REVISION = "71798"
 IOT_CONTROL_TIMEOUT_MS = 10000
 IOT_STREAM_TIMEOUT_MS = 20000
 IOT_CONTROL_QOS = 1
@@ -226,9 +236,7 @@ class ImouCredentialError(ImouAuthError):
         if failure_count is not None and failure_count < 0:
             failure_count = None
         self.failure_count = failure_count
-        detail = (
-            f" (failNum={failure_count})" if failure_count is not None else ""
-        )
+        detail = f" (failNum={failure_count})" if failure_count is not None else ""
         super().__init__(f"Account/password rejected{detail}", LOGIN_REJECTED_CODE)
 
 
@@ -710,9 +718,7 @@ def _contains_live_url(value: Any, depth: int = 0) -> bool:
     if isinstance(value, Mapping):
         for key, item in value.items():
             normalized_key = "".join(
-                character
-                for character in str(key).casefold()
-                if character.isalnum()
+                character for character in str(key).casefold() if character.isalnum()
             )
             if (
                 normalized_key in _LIVE_RESPONSE_KEYS
@@ -758,14 +764,9 @@ def _contains_playable_live_url(value: Any, depth: int = 0) -> bool:
     if isinstance(value, Mapping):
         for key, item in value.items():
             normalized_key = "".join(
-                character
-                for character in str(key).casefold()
-                if character.isalnum()
+                character for character in str(key).casefold() if character.isalnum()
             )
-            if (
-                normalized_key in _LIVE_RESPONSE_KEYS
-                and _stream_url_is_playable(item)
-            ):
+            if normalized_key in _LIVE_RESPONSE_KEYS and _stream_url_is_playable(item):
                 return True
             if isinstance(item, (Mapping, list, tuple)) and _contains_playable_live_url(
                 item, depth + 1
@@ -785,6 +786,37 @@ def _numeric_channel_id(channel_id: str | int | None) -> int | None:
         return int(str(channel_id).strip())
     except (TypeError, ValueError):
         return None
+
+
+def _ability_switch_values(
+    data: Mapping[str, Any], requested: Iterable[str]
+) -> dict[str, bool]:
+    """Normalize AbilityEnableQuery output into boolean states."""
+    requested_set = set(requested)
+    result: dict[str, bool] = {}
+    channels = data.get("channels")
+    if not isinstance(channels, list):
+        return result
+    for channel in channels:
+        if not isinstance(channel, Mapping):
+            continue
+        details = channel.get("detail")
+        if not isinstance(details, list):
+            continue
+        for detail in details:
+            if not isinstance(detail, Mapping):
+                continue
+            ability = str(detail.get("type") or "")
+            if ability not in requested_set:
+                continue
+            result[ability] = str(detail.get("enable") or "").casefold() in {
+                "on",
+                "1",
+                "true",
+                "enable",
+                "enabled",
+            }
+    return result
 
 
 def _normalize_stream_service_value(
@@ -1016,8 +1048,7 @@ class ImouApiClient:
             oldest = min(cache.items(), key=lambda item: item[1])[0]
             del cache[oldest]
         _LOGGER.debug(
-            "Imou legacy device list unavailable api=%s host=%s "
-            "retry_after_seconds=%s",
+            "Imou legacy device list unavailable api=%s host=%s retry_after_seconds=%s",
             _LEGACY_DEVICE_LIST_API,
             urlparse(base_url).hostname or base_url,
             _LEGACY_DISCOVERY_RETRY_SECONDS,
@@ -1118,9 +1149,7 @@ class ImouApiClient:
         if api_name == "common.validcode.GetValidCode":
             if code in IMAGE_CAPTCHA_CODES:
                 return (
-                    "GetValidCodeToPhone"
-                    if self._area_code
-                    else "GetValidCodeToEmail"
+                    "GetValidCodeToPhone" if self._area_code else "GetValidCodeToEmail"
                 )
             return "GrantingCredit"
         if api_name == "user.account.GrantingCredit":
@@ -1478,7 +1507,8 @@ class ImouApiClient:
                 "Imou QR recovery host selected host=%s status=%s",
                 urlparse(query_base_url).hostname or "unknown",
                 qr_result.status
-                if qr_result.status in {"login", "expire", "cancel", "waiting", "unscan", "scan"}
+                if qr_result.status
+                in {"login", "expire", "cancel", "waiting", "unscan", "scan"}
                 else "<redacted>",
             )
         regional_attempted = False
@@ -1752,11 +1782,28 @@ class ImouApiClient:
     @staticmethod
     def _safe_mapping_keys(value: Mapping[str, Any]) -> str:
         allowed = {
-            "status", "username", "userName", "token", "accessToken", "userToken",
-            "sessionId", "sessionID", "sessionid", "entryUrlV2", "entryUrl",
-            "supportPcAutoLogin", "creditTerminal", "isSingleCredit", "data",
-            "captchaMode", "captchaData", "captchaId", "captchaServer",
-            "verifyToken", "captchaMetaData", "_responseHeaderNames",
+            "status",
+            "username",
+            "userName",
+            "token",
+            "accessToken",
+            "userToken",
+            "sessionId",
+            "sessionID",
+            "sessionid",
+            "entryUrlV2",
+            "entryUrl",
+            "supportPcAutoLogin",
+            "creditTerminal",
+            "isSingleCredit",
+            "data",
+            "captchaMode",
+            "captchaData",
+            "captchaId",
+            "captchaServer",
+            "verifyToken",
+            "captchaMetaData",
+            "_responseHeaderNames",
             "_responseAuthSources",
         }
         names = sorted(key for key in value if key in allowed)
@@ -1770,18 +1817,33 @@ class ImouApiClient:
         if not isinstance(metadata, (list, tuple)):
             return "none"
         fields = {
-            "x-pcs-token", "x-token", "token", "x-pcs-session-id", "x-session-id",
-            "session-id", "x-pcs-entry-url-v2", "x-entry-url-v2", "entry-url-v2",
-            "x-pcs-username", "x-username", "username",
+            "x-pcs-token",
+            "x-token",
+            "token",
+            "x-pcs-session-id",
+            "x-session-id",
+            "session-id",
+            "x-pcs-entry-url-v2",
+            "x-entry-url-v2",
+            "entry-url-v2",
+            "x-pcs-username",
+            "x-username",
+            "username",
         }
         allowed = (
             fields | {"content-type", "content-length", "date", "x-pcs-date", "server"}
             if key == "_responseHeaderNames"
             else {f"header:{name}" for name in fields}
             | {
-                f"cookie:{name}" for name in (
-                    "token", "accesstoken", "access_token", "sessionid",
-                    "session_id", "username", "entryurlv2",
+                f"cookie:{name}"
+                for name in (
+                    "token",
+                    "accesstoken",
+                    "access_token",
+                    "sessionid",
+                    "session_id",
+                    "username",
+                    "entryurlv2",
                 )
             }
         )
@@ -2029,9 +2091,7 @@ class ImouApiClient:
             if status in {401, 403}:
                 raise ImouAuthError("Authentication failed", status)
             raise ImouConnectionError("Imou cloud response exceeded size limit")
-        legacy_unavailable = (
-            status == 404 and api_name == _LEGACY_DEVICE_LIST_API
-        )
+        legacy_unavailable = status == 404 and api_name == _LEGACY_DEVICE_LIST_API
         try:
             payload = json.loads(raw)
         except (UnicodeDecodeError, ValueError, RecursionError):
@@ -2056,9 +2116,7 @@ class ImouApiClient:
             )
             log_level = (
                 logging.DEBUG
-                if is_property_rejection
-                or is_unavailable_legacy
-                or is_ptz_no_authority
+                if is_property_rejection or is_unavailable_legacy or is_ptz_no_authority
                 else logging.WARNING
             )
             _LOGGER.log(
@@ -2255,18 +2313,33 @@ class ImouApiClient:
                 if not isinstance(raw, Mapping):
                     continue
                 device_id = _api_identifier(raw, "deviceId", "deviceid")
-                if not device_id or incomplete is not None and device_id not in incomplete:
+                if (
+                    not device_id
+                    or incomplete is not None
+                    and device_id not in incomplete
+                ):
                     continue
                 record = merged.setdefault(device_id, {})
-                known_device = device_from_api(record) if incomplete is not None else None
+                known_device = (
+                    device_from_api(record) if incomplete is not None else None
+                )
                 channel_products = (
-                    {channel.channel_id: channel.product_id for channel in known_device.channels}
-                    if known_device is not None else {}
+                    {
+                        channel.channel_id: channel.product_id
+                        for channel in known_device.channels
+                    }
+                    if known_device is not None
+                    else {}
                 )
                 for key, value in raw.items():
                     if incomplete is not None and key not in (
-                        "productId", "productid", "channelList", "channels",
-                        "channelNum", "channelnum", "productChannelNum",
+                        "productId",
+                        "productid",
+                        "channelList",
+                        "channels",
+                        "channelNum",
+                        "channelnum",
+                        "productChannelNum",
                     ):
                         continue
                     if key in ("channelList", "channels") and isinstance(value, list):
@@ -2275,12 +2348,15 @@ class ImouApiClient:
                                 {
                                     "channelId": channel_id,
                                     "productId": channel_products.get(channel_id)
-                                    or _api_identifier(channel, "productId", "productid"),
+                                    or _api_identifier(
+                                        channel, "productId", "productid"
+                                    ),
                                 }
                                 for index, channel in enumerate(value)
                                 if isinstance(channel, Mapping)
                                 for channel_id in (
-                                    _api_identifier(channel, "channelId", "channelid") or str(index),
+                                    _api_identifier(channel, "channelId", "channelid")
+                                    or str(index),
                                 )
                             ]
                         previous = record.get(key)
@@ -2345,8 +2421,7 @@ class ImouApiClient:
                     "productId": product_id,
                     "channelIds": channel_ids,
                     "apIds": ap_ids,
-                    "isBluetooth": getattr(device, "catalog", None)
-                    == "BluetoothLock",
+                    "isBluetooth": getattr(device, "catalog", None) == "BluetoothLock",
                     "multiView": multi_view,
                     "category": category,
                     "subCategory": sub_category,
@@ -2531,7 +2606,9 @@ class ImouApiClient:
                 else {"offset": offset, "transferStr": transfer}
             )
             try:
-                data = await self.async_request(api, revision, {**payload, **pagination})
+                data = await self.async_request(
+                    api, revision, {**payload, **pagination}
+                )
             except ImouAuthError:
                 raise
             except ImouApiError as err:
@@ -2642,6 +2719,73 @@ class ImouApiClient:
                     return host
         return None
 
+    async def async_get_device_details(self, device_id: str) -> dict[str, Any]:
+        """Return the rich cloud detail record used by the mobile app."""
+        data = await self.async_request(
+            DEVICE_DETAILS_API,
+            SIGNATURE_REVISION,
+            {"deviceId": device_id},
+        )
+        devices = data.get("deviceList") if isinstance(data, Mapping) else None
+        if isinstance(devices, list):
+            for item in devices:
+                if (
+                    isinstance(item, Mapping)
+                    and _api_identifier(item, "deviceId", "deviceid") == device_id
+                ):
+                    return dict(item)
+        return dict(data) if isinstance(data, Mapping) else {}
+
+    async def async_get_ability_switches(
+        self, device_id: str, channel_id: str, abilities: Iterable[str]
+    ) -> dict[str, bool]:
+        """Return cloud ability switch states for one channel."""
+        requested = list(dict.fromkeys(abilities))
+        if not requested:
+            return {}
+        data = await self.async_request(
+            ABILITY_QUERY_API,
+            ABILITY_REVISION,
+            {
+                "deviceId": device_id,
+                "device": [],
+                "channels": [
+                    {
+                        "channelId": _numeric_channel_id(channel_id) or 0,
+                        "type": requested,
+                    }
+                ],
+            },
+        )
+        return _ability_switch_values(data, requested)
+
+    async def async_set_ability_switches(
+        self,
+        device_id: str,
+        channel_id: str,
+        values: Mapping[str, bool],
+    ) -> None:
+        """Apply cloud ability switch states for one channel."""
+        if not values:
+            return
+        await self.async_request(
+            ABILITY_CONFIG_API,
+            ABILITY_REVISION,
+            {
+                "deviceId": device_id,
+                "device": [],
+                "channels": [
+                    {
+                        "channelId": _numeric_channel_id(channel_id) or 0,
+                        "detail": [
+                            {"type": ability, "enable": "on" if enabled else "off"}
+                            for ability, enabled in values.items()
+                        ],
+                    }
+                ],
+            },
+        )
+
     @staticmethod
     def _group_control_enabled(group_control_flag: str) -> bool:
         return str(group_control_flag).strip().casefold() in {"1", "true"}
@@ -2718,7 +2862,9 @@ class ImouApiClient:
                     result = await self._async_iot_request(
                         api_name,
                         payload,
-                        timeout_ms=int(payload.get("timeout") or IOT_CONTROL_TIMEOUT_MS),
+                        timeout_ms=int(
+                            payload.get("timeout") or IOT_CONTROL_TIMEOUT_MS
+                        ),
                         transport=transport,
                     )
                 except ImouMqttUnavailable:
@@ -2878,20 +3024,20 @@ class ImouApiClient:
                 if not missing and primary_error is not None:
                     raise primary_error
                 if missing:
-                    identifiers = [
-                        str(fallback_identifiers[ref]) for ref in missing
-                    ]
+                    identifiers = [str(fallback_identifiers[ref]) for ref in missing]
                     retry_payload = dict(payload)
                     retry_payload["properties"] = identifiers
                     try:
-                        retry_data = await self._async_control_request_with_channel_fallback(
-                            "GetProperties",
-                            product_id,
-                            device_id,
-                            group_control_flag,
-                            retry_payload,
-                            channel_id=channel_id,
-                            fallback_on_any_error=True,
+                        retry_data = (
+                            await self._async_control_request_with_channel_fallback(
+                                "GetProperties",
+                                product_id,
+                                device_id,
+                                group_control_flag,
+                                retry_payload,
+                                channel_id=channel_id,
+                                fallback_on_any_error=True,
+                            )
                         )
                     except ImouAuthError:
                         raise
@@ -2945,11 +3091,7 @@ class ImouApiClient:
         except (ImouAuthError, ImouConnectionError):
             raise
         except ImouApiError as err:
-            if (
-                not fallback_identifiers
-                or err.code is None
-                or 300 <= err.code < 600
-            ):
+            if not fallback_identifiers or err.code is None or 300 <= err.code < 600:
                 raise
             _LOGGER.debug(
                 "Retrying Imou property write by identifiers code=%s",
@@ -2980,9 +3122,7 @@ class ImouApiClient:
     ) -> dict[str, Any]:
         """Invoke a service exposed by a product thing model."""
         service_ref = (
-            _STREAM_SERVICE_REF
-            if service == _STREAM_SERVICE_NAME
-            else str(service)
+            _STREAM_SERVICE_REF if service == _STREAM_SERVICE_NAME else str(service)
         )
         payload: dict[str, Any] = {
             "deviceId": device_id,
@@ -3158,7 +3298,9 @@ class ImouApiClient:
         preferred_mode = self._live_modes.get(cache_key)
         if preferred_mode and preferred_mode.startswith("standard-"):
             standard_attempts.sort(
-                key=lambda attempt: attempt[0] != preferred_mode.removeprefix("standard-")
+                key=lambda attempt: (
+                    attempt[0] != preferred_mode.removeprefix("standard-")
+                )
             )
         for mode, stream_type in standard_attempts:
             payload = {**standard_payload, "streamType": stream_type}

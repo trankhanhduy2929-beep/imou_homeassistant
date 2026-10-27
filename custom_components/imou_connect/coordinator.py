@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from homeassistant.config_entries import ConfigEntryAuthFailed
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
@@ -39,21 +40,23 @@ from .const import (
     DEFAULT_ONVIF_PORT,
     DOMAIN,
     EVENT_REALTIME,
-    REALTIME_HOLD_SECONDS,
     PTZ_NO_AUTHORITY_CODES,
     PTZ_STEP_DURATION_MS,
+    REALTIME_HOLD_SECONDS,
 )
 from .media import configured_local_cameras, local_camera_key
-from .onvif_ptz import OnvifPtzClient, OnvifPtzError
 from .models import (
+    ImouChannel,
     ImouDevice,
     ThingModel,
     ThingProperty,
     ThingService,
+    ability_switch_types,
     normalize_property_values,
     parse_thing_model,
     stream_entry_host,
 )
+from .onvif_ptz import OnvifPtzClient, OnvifPtzError
 from .realtime import (
     ImouRealtimeEvent,
     alarm_identity,
@@ -65,6 +68,8 @@ from .realtime import (
 _LOGGER = logging.getLogger(__name__)
 _MODEL_TTL = 300
 _MODEL_RETRY_DELAY = 60
+_DETAILS_TTL = 300
+_ABILITY_TTL = 60
 _ALARM_IDENTITY_LIMIT = 2048
 _PROPERTY_PUSH_LIMIT = 2048
 
@@ -95,12 +100,14 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
         self._model_cache: dict[str, ThingModel] = {}
         self._model_cache_expires: dict[str, float] = {}
         self._model_locks: dict[str, asyncio.Lock] = {}
+        self._details_cache: dict[str, tuple[float, Mapping[str, Any]]] = {}
+        self._abilities_cache: dict[
+            tuple[str, str], tuple[float, Mapping[str, bool]]
+        ] = {}
         self.realtime_connected = False
         self._realtime_states: dict[tuple[str, str, str], bool] = {}
         self._realtime_events: dict[tuple[str, str], dict[str, Any]] = {}
-        self._realtime_clear_tasks: dict[
-            tuple[str, str, str], asyncio.Task[None]
-        ] = {}
+        self._realtime_clear_tasks: dict[tuple[str, str, str], asyncio.Task[None]] = {}
         self._alarm_identities: OrderedDict[str, None] = OrderedDict()
         self._property_push_revision = 0
         self._property_pushes: OrderedDict[
@@ -138,9 +145,7 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
         try:
             enriched = await asyncio.gather(
                 *(
-                    self._async_enrich_device(
-                        device, previous.get(device.device_id)
-                    )
+                    self._async_enrich_device(device, previous.get(device.device_id))
                     for device in devices
                 )
             )
@@ -165,14 +170,21 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
             for prop in device.thing_model.properties:
                 if prop.sensitive:
                     continue
-                pushed = self._property_pushes.get((
-                    device.device_id.casefold(), device.product_id,
-                    self._default_channel_id(device), prop.identifier, prop.ref,
-                ))
+                pushed = self._property_pushes.get(
+                    (
+                        device.device_id.casefold(),
+                        device.product_id,
+                        self._default_channel_id(device),
+                        prop.identifier,
+                        prop.ref,
+                    )
+                )
                 if pushed is not None and pushed[0] > push_revision:
                     deltas[prop.identifier] = deepcopy(pushed[1])
             if deltas:
-                result[device_id] = device.with_properties({**device.properties, **deltas})
+                result[device_id] = device.with_properties(
+                    {**device.properties, **deltas}
+                )
         self._data_generation += 1
         return result
 
@@ -192,10 +204,13 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
         properties = model.exposed_properties(self.max_properties)
         readable_properties = tuple(prop for prop in properties if prop.readable)
         values = {}
-        if previous is not None and self._default_channel_id(previous) == self._default_channel_id(device):
+        if previous is not None and self._default_channel_id(
+            previous
+        ) == self._default_channel_id(device):
             previous_keys = {
                 (prop.identifier, prop.ref)
-                for prop in previous.thing_model.properties if not prop.sensitive
+                for prop in previous.thing_model.properties
+                if not prop.sensitive
             }
             values = {
                 prop.identifier: previous.properties[prop.identifier]
@@ -224,8 +239,98 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
                 raise
             except ImouApiError as err:
                 _LOGGER.debug("Property refresh unavailable code=%s", err.code)
-        enriched = device.with_thing_model(model).with_properties(values)
-        return enriched
+        details = {}
+        channel_abilities = {}
+        if not device.product_id:
+            details = await self._async_device_details(device.device_id)
+            channel_abilities = dict(
+                await asyncio.gather(
+                    *(
+                        self._async_channel_abilities(device, channel)
+                        for channel in device.channels
+                    )
+                )
+            )
+        return (
+            device.with_thing_model(model)
+            .with_properties(values)
+            .with_details(details)
+            .with_channel_abilities(channel_abilities)
+        )
+
+    async def _async_device_details(self, device_id: str) -> Mapping[str, Any]:
+        """Return cached cloud device details with a short retry backoff."""
+        cache = getattr(self, "_details_cache", None)
+        if cache is None:
+            cache = self._details_cache = {}
+        cached = cache.get(device_id)
+        now = time.monotonic()
+        if cached is not None and now < cached[0]:
+            return cached[1]
+        try:
+            details = await self.api.async_get_device_details(device_id)
+        except ImouAuthError:
+            raise
+        except ImouApiError as err:
+            _LOGGER.debug("Device details unavailable code=%s", err.code)
+            cache[device_id] = (now + _MODEL_RETRY_DELAY, {})
+            return {}
+        cache[device_id] = (now + _DETAILS_TTL, details)
+        return details
+
+    async def _async_channel_abilities(
+        self, device: ImouDevice, channel: ImouChannel
+    ) -> tuple[str, Mapping[str, bool]]:
+        """Return cached PaaS ability switch states for one channel."""
+        types = ability_switch_types(device.raw, channel.raw)
+        if not types:
+            return channel.channel_id, channel.abilities
+        key = (device.device_id, channel.channel_id)
+        cache = getattr(self, "_abilities_cache", None)
+        if cache is None:
+            cache = self._abilities_cache = {}
+        cached = cache.get(key)
+        now = time.monotonic()
+        if cached is not None and now < cached[0]:
+            return channel.channel_id, cached[1]
+        try:
+            states = await self.api.async_get_ability_switches(
+                device.device_id, channel.channel_id, types
+            )
+        except ImouAuthError:
+            raise
+        except ImouApiError as err:
+            _LOGGER.debug("Ability switches unavailable code=%s", err.code)
+            cache[key] = (now + _MODEL_RETRY_DELAY, channel.abilities)
+            return channel.channel_id, channel.abilities
+        cache[key] = (now + _ABILITY_TTL, states)
+        return channel.channel_id, states
+
+    async def async_set_ability(
+        self, device_id: str, channel_id: str, ability: str, enabled: bool
+    ) -> None:
+        """Write one PaaS ability switch and update the cached snapshot."""
+        device = self.device(device_id)
+        if device is None:
+            raise HomeAssistantError("Imou device is not available")
+        channel = next(
+            (item for item in device.channels if item.channel_id == channel_id),
+            None,
+        )
+        if channel is None or ability not in channel.abilities:
+            raise HomeAssistantError("Imou ability switch is not available")
+        values = {**channel.abilities, ability: enabled}
+        await self.api.async_set_ability_switches(device_id, channel_id, values)
+        cache = getattr(self, "_abilities_cache", None)
+        if cache is None:
+            cache = self._abilities_cache = {}
+        cache[(device_id, channel_id)] = (
+            time.monotonic() + _ABILITY_TTL,
+            values,
+        )
+        updated = device.with_channel_abilities({channel_id: values})
+        if isinstance(self.data, dict):
+            self.async_set_updated_data({**self.data, device_id: updated})
 
     async def _async_product_model(
         self, product_id: str, previous: ThingModel
@@ -262,7 +367,9 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
             )
             _LOGGER.debug(
                 "Thing model properties=%s services=%s exposed=%s",
-                len(model.properties), len(model.services), exposed,
+                len(model.properties),
+                len(model.services),
+                exposed,
             )
             return model
 
@@ -318,13 +425,14 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
             if normalized_channel in {"", "-1"}:
                 if len(device.channels) != 1:
                     return data, False
-            elif normalized_channel not in {channel.channel_id for channel in device.channels}:
+            elif normalized_channel not in {
+                channel.channel_id for channel in device.channels
+            }:
                 return data, False
         normalized = {}
-        if (
-            channel_id == self._default_channel_id(device)
-            and str(event.product_id).strip() in {"", device.product_id}
-        ):
+        if channel_id == self._default_channel_id(device) and str(
+            event.product_id
+        ).strip() in {"", device.product_id}:
             normalized = normalize_property_values(
                 (prop for prop in device.thing_model.properties if not prop.sensitive),
                 event.properties,
@@ -345,7 +453,8 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
                     prop.ref,
                 )
                 self._property_pushes[key] = (
-                    self._property_push_revision, deepcopy(normalized[prop.identifier])
+                    self._property_push_revision,
+                    deepcopy(normalized[prop.identifier]),
                 )
                 self._property_pushes.move_to_end(key)
             while len(self._property_pushes) > _PROPERTY_PUSH_LIMIT:
@@ -407,9 +516,7 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
         self.async_update_listeners()
 
     @staticmethod
-    def _event_matches_product(
-        event: ImouRealtimeEvent, device: ImouDevice
-    ) -> bool:
+    def _event_matches_product(event: ImouRealtimeEvent, device: ImouDevice) -> bool:
         """Ignore property pushes carrying another product's identity."""
         product_id = str(event.product_id).strip()
         if not product_id:
@@ -437,7 +544,9 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
         keys = set()
         for prop in model.properties:
             if prop.sensitive:
-                keys.update(str(key).strip().casefold() for key in (prop.identifier, prop.ref))
+                keys.update(
+                    str(key).strip().casefold() for key in (prop.identifier, prop.ref)
+                )
                 try:
                     keys.add(str(int(prop.ref)))
                 except ValueError:
@@ -510,7 +619,9 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
             timestamp = alarm.get("time")
             if timestamp in (None, ""):
                 timestamp = alarm.get("timestamp")
-            if (initial_poll or timestamp not in (None, "")) and not self._alarm_is_recent(alarm):
+            if (
+                initial_poll or timestamp not in (None, "")
+            ) and not self._alarm_is_recent(alarm):
                 continue
             updated_data, _ = await self._async_apply_realtime_event(
                 alarm_to_realtime_event(alarm),
@@ -559,7 +670,10 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
         if direct is not None:
             return device_id, direct
         for key, device in data.items():
-            if key.casefold() == normalized or device.device_id.casefold() == normalized:
+            if (
+                key.casefold() == normalized
+                or device.device_id.casefold() == normalized
+            ):
                 return key, device
         return None, None
 
@@ -611,8 +725,7 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
             if parsed.tzinfo is None:
                 timezone = UTC
                 timezone_name = str(
-                    getattr(getattr(self.hass, "config", None), "time_zone", "")
-                    or ""
+                    getattr(getattr(self.hass, "config", None), "time_zone", "") or ""
                 )
                 if timezone_name:
                     try:
@@ -644,9 +757,7 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
             self._realtime_states.pop(key, None)
         return previous != active
 
-    async def _async_clear_realtime_state(
-        self, key: tuple[str, str, str]
-    ) -> None:
+    async def _async_clear_realtime_state(self, key: tuple[str, str, str]) -> None:
         current_task = asyncio.current_task()
         try:
             await asyncio.sleep(REALTIME_HOLD_SECONDS)
@@ -680,9 +791,8 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
         device = self.device(device_id)
         if device is None:
             raise UpdateFailed("Imou device is no longer available")
-        if (
-            not prop.writable
-            or prop not in device.thing_model.exposed_properties(self.max_properties)
+        if not prop.writable or prop not in device.thing_model.exposed_properties(
+            self.max_properties
         ):
             raise UpdateFailed("Imou property is no longer writable")
         push_revision = self._property_push_revision
@@ -711,13 +821,21 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
             and refreshed.properties.get(prop.identifier) != value
             and self._data_generation == data_generation
         ):
-            pushed = self._property_pushes.get((
-                device.device_id.casefold(), device.product_id,
-                self._default_channel_id(device), prop.identifier, prop.ref,
-            ))
+            pushed = self._property_pushes.get(
+                (
+                    device.device_id.casefold(),
+                    device.product_id,
+                    self._default_channel_id(device),
+                    prop.identifier,
+                    prop.ref,
+                )
+            )
             if pushed is None or pushed[0] <= push_revision:
                 optimistic = {**refreshed.properties, prop.identifier: deepcopy(value)}
-                updated = {**current, device.device_id: refreshed.with_properties(optimistic)}
+                updated = {
+                    **current,
+                    device.device_id: refreshed.with_properties(optimistic),
+                }
                 self._async_publish_data(updated)
         await self.async_request_refresh()
 
@@ -761,7 +879,9 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
         device = self.device(device_id)
         if device is None:
             raise UpdateFailed("Imou device is no longer available")
-        if not any(channel.channel_id == str(channel_id) for channel in device.channels):
+        if not any(
+            channel.channel_id == str(channel_id) for channel in device.channels
+        ):
             raise UpdateFailed("Imou camera channel is no longer available")
         onvif = self._onvif_client(device_id, channel_id)
         if onvif is not None:
@@ -782,7 +902,9 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
                 ) from None
             return
         if device_id in self._ptz_rejected:
-            raise UpdateFailed("Imou cloud PTZ was rejected; configure ONVIF LAN for this camera")
+            raise UpdateFailed(
+                "Imou cloud PTZ was rejected; configure ONVIF LAN for this camera"
+            )
         discovered = [
             item
             for item in dict.fromkeys(
@@ -867,9 +989,7 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
             _LOGGER.debug("Imou stream entry unavailable code=%s", err.code)
             return None
 
-    def _onvif_client(
-        self, device_id: str, channel_id: str
-    ) -> OnvifPtzClient | None:
+    def _onvif_client(self, device_id: str, channel_id: str) -> OnvifPtzClient | None:
         """Return a cached ONVIF PTZ client when the channel is local."""
         options = getattr(self.config_entry, "options", None)
         if not isinstance(options, Mapping):
@@ -879,7 +999,9 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
         if camera is None:
             raw = options.get(CONF_LOCAL_CAMERAS)
             if isinstance(raw, Mapping) and key in raw:
-                raise UpdateFailed("Invalid local camera configuration; edit ONVIF settings in Configure")
+                raise UpdateFailed(
+                    "Invalid local camera configuration; edit ONVIF settings in Configure"
+                )
             return None
         if not camera.get(CONF_ONVIF_PTZ):
             return None
@@ -900,7 +1022,9 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
         options = getattr(self.config_entry, "options", None)
         if not isinstance(options, Mapping):
             return False
-        camera = configured_local_cameras(options).get(local_camera_key(device_id, channel_id))
+        camera = configured_local_cameras(options).get(
+            local_camera_key(device_id, channel_id)
+        )
         return bool(camera and camera.get(CONF_ONVIF_PTZ))
 
     def ptz_available(self, device_id: str, channel_id: str | None = None) -> bool:

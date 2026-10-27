@@ -139,7 +139,7 @@ Camera entity được tạo sau khi lưu cấu hình và cấu hình đã lưu 
 | Sensor luôn `unknown` | Property đó cloud không trả giá trị, hoặc thiết bị offline; kiểm tra binary sensor online và thuộc tính chẩn đoán |
 | Sensor không tự cập nhật | Kiểm tra kết nối MQTT (`mqtt_connected`) và thử reload integration; polling 30 giây là dự phòng |
 | Camera không phát được | Mở **Configure**, chọn lại camera để được kiểm tra RTSP và báo nguyên nhân. Nếu luồng chính (main, HEVC nặng) không phát, thử đường dẫn `subtype=1` (luồng phụ) |
-| Chỉ thấy vài entity, thiếu setting/nút | Cập nhật lên `0.1.20` rồi reload integration để discovery/model và entity được làm mới; nếu vẫn thiếu, gửi log đã che thông tin |
+| Chỉ thấy vài entity, thiếu setting/nút | Cập nhật lên `0.2.5` rồi reload integration. Thiết bị PaaS không có `productId`/thing model (ví dụ Cue 2M) dùng switch khả năng cloud và sensor chi tiết; nếu vẫn thiếu, gửi log đã che thông tin |
 | Log lặp `DeviceListPageGet code=404` | Cập nhật lên `0.1.22`: endpoint legacy không có trên endpoint khu vực đó sẽ được ghi nhớ 1 giờ và chỉ ghi DEBUG, không ảnh hưởng thiết bị |
 | Không thấy nút PTZ | Cập nhật lên `0.1.23`. Nút chỉ xuất hiện khi model thiết bị khai báo PTZ; kiểm tra thiết bị có PTZ thật không, thử phát trực tiếp trong app Imou Life, và xem log đã che thông tin |
 | Bấm PTZ báo `code=12100` / `13255` (cloud) | Cloud PTZ của model này bị Imou từ chối. Cập nhật lên `0.2.2` và dùng **ONVIF LAN**: bật ONVIF trên camera rồi đặt cổng ONVIF trong **Configure** (80 hoặc 8000). Khi đã cấu hình ONVIF, lỗi cloud không còn bị gọi tới |
@@ -166,7 +166,8 @@ Khi báo lỗi, gửi log Home Assistant và thuộc tính chẩn đoán. **Khô
 - Kiểm thử được thực hiện với tài khoản người dùng cung cấp; không đưa thông tin tài khoản lên repo.
 - Camera LAN `192.168.5.155` phát được 2304×1296 HEVC 5 frame trong 0.08s qua RTSP TCP và ONVIF kết nối được.
 - Kiểm tra RTSP khi Configure đã thử thật: host không tới trả `stream_timeout`, sai mật khẩu camera trả `stream_unauthorized`.
-- Discovery bổ sung và làm mới entity dùng fixture tổng hợp; **chưa xác minh payload thật của tài khoản từng bị thiếu entity**.
+- Discovery bổ sung và làm mới entity dùng fixture tổng hợp.
+- `0.2.5`: đọc live trên Cue 2M `IPC-C22C-V2` (PaaS, `productId` rỗng) qua `device.list.CommonDeviceDetailsInfoGetByDeviceId` và `device.ability.AbilityEnableQuery`; đã ghi cấu hình khả năng idempotent nhưng **chưa bật/tắt thực tế** trên thiết bị.
 - PTZ: client ONVIF LAN (WSSE, `GetCapabilities`/Media `GetProfiles`/`ContinuousMove`/`Stop`, SOAP 1.2 qua máy chủ giả loopback) và route cloud `things.ptz.PtzMove` (trục/dấu đối chiếu từ APK `10.1.6`) được kiểm thử tự động; **chưa chạy trên camera PTZ thật**, hãy tự kiểm tra với thiết bị của bạn.
 - Motion/person kích hoạt vật lý có thể chưa được xác minh đầy đủ trên mọi model; hãy tự kiểm tra với camera của bạn.
 

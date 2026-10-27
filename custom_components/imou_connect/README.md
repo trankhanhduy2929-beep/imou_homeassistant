@@ -10,6 +10,15 @@ Custom integration này đăng nhập trực tiếp Imou Life bằng account/pas
 4. Nhập tài khoản và mật khẩu Imou Life.
 5. Nếu Imou yêu cầu CAPTCHA, mở liên kết xác minh do config flow hiển thị. Với mã `12112`, nhập mã SMS/email sáu số ở bước tiếp theo.
 
+**Nâng cấp lên `0.2.5`:** giải nén `imou_connect-custom-component-0.2.5.zip`, chép đè mã trong `/config/custom_components/imou_connect`, rồi restart Home Assistant; giữ nguyên cấu hình hiện có.
+
+Bản `0.2.5` (bổ sung entity cho thiết bị PaaS không có thing model, ví dụ Cue 2M):
+
+- **Switch khả năng qua cloud:** dùng `device.ability.AbilityEnableQuery`/`AbilityEnableConfig` (revision `71798`) để tạo switch cho các khả năng thiết bị khai báo trong chuỗi `ability`: phát hiện người, vùng/độ nhạy phát hiện chuyển động, OSD và đèn breathing. Ghi cấu hình gửi đủ trạng thái hiện tại của kênh để không reset các khả năng khác.
+- **Sensor chi tiết thiết bị:** lấy `device.list.CommonDeviceDetailsInfoGetByDeviceId` và tạo sensor chẩn đoán cho tín hiệu Wi-Fi, tên Wi-Fi, trạng thái thẻ nhớ, phiên bản firmware và lần offline cuối. Chỉ áp dụng cho thiết bị không có `productId`/thing model để tránh trùng entity.
+- **Cache và lỗi:** chi tiết thiết bị cache 5 phút, trạng thái khả năng cache 60 giây; lỗi API chỉ ghi mã lỗi, không làm hỏng poll và không tạo entity rác.
+- **Kiểm chứng:** đọc live trên Cue 2M `IPC-C22C-V2`: chi tiết trả Wi-Fi 70%, thẻ nhớ `normal`, firmware `2.680.0000000.30.R.231026`; query khả năng trả 5 mục (`headerDetect` bật, còn lại tắt). Đã ghi lại đúng nguyên trạng cấu hình khả năng (idempotent); chưa bật/tắt thực tế trên thiết bị.
+
 **Nâng cấp lên `0.2.4`:** giải nén `imou_connect-custom-component-0.2.4.zip`, chép đè mã trong `/config/custom_components/imou_connect`, rồi restart Home Assistant; giữ nguyên cấu hình hiện có.
 
 Bản `0.2.4`:
