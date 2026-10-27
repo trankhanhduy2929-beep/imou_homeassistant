@@ -207,11 +207,24 @@ def is_online_status(value: Any) -> bool | None:
 ABILITY_KEYS: Final = ("ability", "abilities", "capability", "capabilities")
 
 ABILITY_SWITCH_TYPES: Final = {
+    "motionDetect": ("Phát hiện chuyển động", "mdi:motion-sensor"),
     "headerDetect": ("Phát hiện người", "mdi:human"),
     "mdw": ("Vùng phát hiện chuyển động", "mdi:vector-square"),
     "mds": ("Độ nhạy phát hiện chuyển động", "mdi:tune"),
+    "localRecord": ("Ghi hình cục bộ", "mdi:record-rec"),
+    "localStorageEnable": ("Lưu trữ thẻ nhớ", "mdi:sd"),
+    "infraredLight": ("Đèn hồng ngoại", "mdi:weather-night"),
+    "wideDynamic": ("Dải động rộng (WDR)", "mdi:contrast-box"),
+    "abAlarmSound": ("Âm thanh cảnh báo", "mdi:volume-high"),
+    "audioEncodeControl": ("Mã hóa âm thanh", "mdi:microphone"),
+    "tlsEnable": ("Mã hóa TLS", "mdi:shield-lock"),
     "osd": ("Hiển thị trên màn hình", "mdi:monitor-eye"),
     "breathingLight": ("Đèn breathing", "mdi:lightbulb-outline"),
+}
+
+ABILITY_TYPE_ALIASES: Final = {
+    "alarmmd": "motionDetect",
+    "audioencodecontrolv2": "audioEncodeControl",
 }
 
 
@@ -220,7 +233,10 @@ def ability_switch_types(
 ) -> tuple[str, ...]:
     """Return cloud ability switches declared by the device or channel."""
     text = f"{_flatten_ability_text(device_raw)} {_flatten_ability_text(channel_raw or {})}"
-    tokens = {token.casefold() for token in re.split(r"[^A-Za-z0-9]+", text)}
+    tokens = {
+        ABILITY_TYPE_ALIASES.get(token.casefold(), token).casefold()
+        for token in re.split(r"[^A-Za-z0-9]+", text)
+    }
     return tuple(
         ability for ability in ABILITY_SWITCH_TYPES if ability.casefold() in tokens
     )
@@ -265,6 +281,16 @@ def stream_entry_host(raw: Mapping[str, Any]) -> str | None:
             host = f"https://{host}"
         return host
     return None
+
+
+def _parse_cloud_timestamp(value: Any) -> datetime | None:
+    """Parse the compact UTC timestamps returned by Imou cloud APIs."""
+    if not value:
+        return None
+    try:
+        return datetime.strptime(str(value), "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
+    except ValueError:
+        return None
 
 
 @dataclass(slots=True, frozen=True)
@@ -439,15 +465,72 @@ class ImouDevice:
         return str(value) if value not in (None, "") else None
 
     @property
+    def network_access_type(self) -> str | None:
+        """Return the cloud-reported network access type."""
+        value = self.details.get("networkAccessType")
+        return str(value) if value not in (None, "") else None
+
+    @property
+    def wifi_band(self) -> str | None:
+        """Return the cloud-reported Wi-Fi band."""
+        value = self.details.get("wifiTransferMode")
+        return str(value) if value not in (None, "") else None
+
+    @property
+    def ip_address(self) -> str | None:
+        """Return the device's last known LAN address."""
+        value = self.details.get("deviceIp")
+        return str(value) if value not in (None, "") else None
+
+    @property
+    def mac_address(self) -> str | None:
+        """Return the device MAC address list."""
+        value = self.details.get("mac")
+        return str(value) if value not in (None, "") else None
+
+    @property
+    def device_model_name(self) -> str | None:
+        """Return the human-readable device model."""
+        value = self.details.get("deviceModelName")
+        return str(value) if value not in (None, "") else None
+
+    def _detail_channel(self) -> Mapping[str, Any] | None:
+        """Return the first channel record from the cloud detail payload."""
+        channels = self.details.get("channels")
+        if isinstance(channels, list):
+            for channel in channels:
+                if isinstance(channel, Mapping):
+                    return channel
+        return None
+
+    @property
+    def storage_strategy_status(self) -> str | None:
+        """Return the cloud storage plan state."""
+        channel = self._detail_channel()
+        if channel is None:
+            return None
+        value = channel.get("storageStrategyStatus")
+        if value in (None, ""):
+            rights = channel.get("vasRights")
+            if isinstance(rights, Mapping):
+                value = rights.get("vasCurrentStatus")
+        return str(value) if value not in (None, "") else None
+
+    @property
+    def cloud_storage_end(self) -> datetime | None:
+        """Return the cloud storage plan expiry timestamp."""
+        channel = self._detail_channel()
+        if channel is None:
+            return None
+        rights = channel.get("vasRights")
+        if not isinstance(rights, Mapping):
+            return None
+        return _parse_cloud_timestamp(rights.get("endTime"))
+
+    @property
     def last_offline(self) -> datetime | None:
         """Return the last cloud-reported offline timestamp."""
-        value = self.details.get("lastOffLineTime")
-        if not value:
-            return None
-        try:
-            return datetime.strptime(str(value), "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
-        except ValueError:
-            return None
+        return _parse_cloud_timestamp(self.details.get("lastOffLineTime"))
 
     @property
     def supports_ability_switches(self) -> bool:

@@ -23,7 +23,14 @@ from .models import ImouDevice, ThingProperty
 DETAIL_SENSORS = {
     "wifi_signal": ("Tín hiệu Wi-Fi", "mdi:wifi", PERCENTAGE),
     "wifi_ssid": ("Tên Wi-Fi", "mdi:wifi", None),
+    "wifi_band": ("Băng tần Wi-Fi", "mdi:wifi-arrow-up-down", None),
+    "network_access_type": ("Kiểu kết nối mạng", "mdi:lan-connect", None),
+    "ip_address": ("Địa chỉ IP", "mdi:ip-network", None),
+    "mac_address": ("Địa chỉ MAC", "mdi:identifier", None),
+    "device_model_name": ("Model thiết bị", "mdi:cctv", None),
     "sdcard_status": ("Thẻ nhớ", "mdi:sd", None),
+    "storage_strategy_status": ("Lưu trữ đám mây", "mdi:cloud-alert", None),
+    "cloud_storage_end": ("Hạn lưu trữ đám mây", "mdi:calendar-clock", None),
     "firmware_version": ("Phiên bản firmware", "mdi:chip", None),
     "last_offline": ("Lần offline cuối", "mdi:clock-outline", None),
 }
@@ -117,7 +124,7 @@ class ImouDetailSensor(ImouEntity, SensorEntity):
         self._attr_native_unit_of_measurement = unit
         if key == "wifi_signal":
             self._attr_state_class = SensorStateClass.MEASUREMENT
-        elif key == "last_offline":
+        elif key in {"last_offline", "cloud_storage_end"}:
             self._attr_device_class = SensorDeviceClass.TIMESTAMP
 
     @property
@@ -126,6 +133,4 @@ class ImouDetailSensor(ImouEntity, SensorEntity):
         device = self.device
         if device is None:
             return None
-        if self.detail_key == "last_offline":
-            return device.last_offline
         return getattr(device, self.detail_key, None)

@@ -10,7 +10,14 @@ Custom integration này đăng nhập trực tiếp Imou Life bằng account/pas
 4. Nhập tài khoản và mật khẩu Imou Life.
 5. Nếu Imou yêu cầu CAPTCHA, mở liên kết xác minh do config flow hiển thị. Với mã `12112`, nhập mã SMS/email sáu số ở bước tiếp theo.
 
-**Nâng cấp lên `0.2.5`:** giải nén `imou_connect-custom-component-0.2.5.zip`, chép đè mã trong `/config/custom_components/imou_connect`, rồi restart Home Assistant; giữ nguyên cấu hình hiện có.
+**Nâng cấp lên `0.2.6`:** giải nén `imou_connect-custom-component-0.2.6.zip`, chép đè mã trong `/config/custom_components/imou_connect`, rồi restart Home Assistant; giữ nguyên cấu hình hiện có.
+
+Bản `0.2.6` (mở rộng entity cho thiết bị PaaS như Cue 2M):
+
+- **Switch khả năng:** tăng từ 5 lên tối đa 13 switch theo chuỗi `ability` của thiết bị: phát hiện chuyển động/người, vùng và độ nhạy chuyển động, ghi hình cục bộ, lưu trữ thẻ nhớ, đèn hồng ngoại, WDR, âm thanh cảnh báo, mã hóa âm thanh, TLS, OSD và đèn breathing. Ánh xạ thêm `AlarmMD` → `motionDetect`, `AudioEncodeControlV2` → `audioEncodeControl`.
+- **Sensor chi tiết:** tăng lên 12 sensor chẩn đoán, bổ sung băng tần Wi-Fi, kiểu kết nối mạng, IP, MAC, model, trạng thái lưu trữ đám mây và hạn lưu trữ đám mây bên cạnh Wi-Fi/thẻ nhớ/firmware/lần offline cuối.
+- **Kiểm chứng live trên Cue 2M `IPC-C22C-V2`:** query trả 13 khả năng và 13 trạng thái; ghi lại đúng nguyên trạng cả 13 khả năng được cloud chấp nhận, đọc lại không đổi. Không đưa `whiteLight` thành switch vì `AbilityEnableConfig` từ chối type này với mã `13908`; chưa bật/tắt thực tế trên thiết bị.
+- **Kiểm thử:** 601 test pass, 1 skip.
 
 Bản `0.2.5` (bổ sung entity cho thiết bị PaaS không có thing model, ví dụ Cue 2M):
 
