@@ -246,7 +246,7 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
             channel_abilities = dict(
                 await asyncio.gather(
                     *(
-                        self._async_channel_abilities(device, channel)
+                        self._async_channel_abilities(device, channel, details)
                         for channel in device.channels
                     )
                 )
@@ -279,10 +279,13 @@ class ImouDataUpdateCoordinator(DataUpdateCoordinator[dict[str, ImouDevice]]):
         return details
 
     async def _async_channel_abilities(
-        self, device: ImouDevice, channel: ImouChannel
+        self,
+        device: ImouDevice,
+        channel: ImouChannel,
+        details: Mapping[str, Any],
     ) -> tuple[str, Mapping[str, bool]]:
         """Return cached PaaS ability switch states for one channel."""
-        types = ability_switch_types(device.raw, channel.raw)
+        types = ability_switch_types({**device.raw, **details}, channel.raw)
         if not types:
             return channel.channel_id, channel.abilities
         key = (device.device_id, channel.channel_id)
