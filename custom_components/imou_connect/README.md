@@ -10,6 +10,10 @@ Custom integration này đăng nhập trực tiếp Imou Life bằng account/pas
 4. Nhập tài khoản và mật khẩu Imou Life.
 5. Nếu Imou yêu cầu CAPTCHA, mở liên kết xác minh do config flow hiển thị. Với mã `12112`, nhập mã SMS/email sáu số ở bước tiếp theo.
 
+**Nâng cấp lên `0.2.8`:** giải nén `imou_connect-custom-component-0.2.8.zip`, chép đè mã trong `/config/custom_components/imou_connect`, rồi restart Home Assistant; giữ nguyên cấu hình hiện có.
+
+Bản `0.2.8` bổ sung `hacs.json` để HACS cài/cập nhật được; mã custom integration không thay đổi so với `0.2.6`.
+
 **Nâng cấp lên `0.2.7`:** giải nén `imou_connect-custom-component-0.2.7.zip`, chép đè mã trong `/config/custom_components/imou_connect`, rồi restart Home Assistant; giữ nguyên cấu hình hiện có.
 
 Bản `0.2.7` phát hành để HACS nhận bản mới; mã custom integration không thay đổi so với `0.2.6`.
