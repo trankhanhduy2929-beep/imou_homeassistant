@@ -171,6 +171,16 @@ Khi báo lỗi, gửi log Home Assistant và thuộc tính chẩn đoán. **Khô
 - PTZ: client ONVIF LAN (WSSE, `GetCapabilities`/Media `GetProfiles`/`ContinuousMove`/`Stop`, SOAP 1.2 qua máy chủ giả loopback) và route cloud `things.ptz.PtzMove` (trục/dấu đối chiếu từ APK `10.1.6`) được kiểm thử tự động; **chưa chạy trên camera PTZ thật**, hãy tự kiểm tra với thiết bị của bạn.
 - Motion/person kích hoạt vật lý có thể chưa được xác minh đầy đủ trên mọi model; hãy tự kiểm tra với camera của bạn.
 
+## Add-on MQTT bridge (tuỳ chọn)
+
+Mã nguồn add-on nằm tại `addons/imou_life_bridge`, dùng khi cần Home Assistant MQTT Discovery thay vì custom integration.
+
+1. Tải `imou_life-bridge-addon-1.0.34.zip` từ release `bridge-1.0.34`.
+2. Giải nén để có thư mục `imou_life_bridge`, chép vào `/addons/imou_life_bridge`.
+3. Trong Add-on Store chọn **Check for updates**, cài **Imou Life Bridge**, nhập account/password rồi start.
+
+Bản `1.0.34` bỏ `image_encoding` rỗng khỏi camera MQTT Discovery để Home Assistant nhận snapshot JPEG thô thay vì từ chối cấu hình và bỏ qua camera. Xem `addons/imou_life_bridge/README.md` và `CHANGELOG.md` để biết phạm vi kiểm thử.
+
 ## Ghi nhận
 
 Cảm ơn `dh-p2p` (khoanguyen-3fc) cho phần tham khảo P2P. Giấy phép MIT kèm theo trong
